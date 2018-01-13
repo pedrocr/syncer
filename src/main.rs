@@ -228,6 +228,23 @@ impl FilesystemMT for FS {
     Ok(created_dir)
   }
 
+  fn truncate(&self, _req: RequestInfo, path: &Path, _fh: Option<u64>, size: u64) -> ResultEmpty {
+    let mut entry = match self.get_entry(path) {
+      Some(e) => e,
+      None => return Err(ENOENT),
+    };
+
+    let size = size as usize;
+    if size == entry.data.len() { return Ok(()) } // Nothing to do
+
+    entry.data.resize(size, 0);
+
+    let mut entries = self.entries.lock().unwrap();
+    entries.insert(path.to_path_buf(), entry);
+
+    Ok(())
+  }
+
   fn write(&self, _req: RequestInfo, path: &Path, _fh: u64, offset: u64, data: Vec<u8>, _flags: u32) -> ResultWrite {
     let mut entry = match self.get_entry(path) {
       Some(e) => e,
