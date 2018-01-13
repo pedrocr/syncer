@@ -264,6 +264,15 @@ impl FilesystemMT for FS {
     self.remove_entry(&path);
     Ok(())
   }
+
+  fn rename(&self, _red: RequestInfo, parent: &Path, name: &OsStr, newparent: &Path, newname: &OsStr) -> ResultEmpty {
+    let path = self.path_from_parts(parent, name);
+    let newpath = self.path_from_parts(newparent, newname);
+    let entry = try!(self.get_entry(&path));
+    self.remove_entry(&path);
+    self.insert_entry(newpath, entry);
+    Ok(())
+  }
 }
 
 fn main() {
