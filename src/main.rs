@@ -8,7 +8,7 @@ use std::ffi::{OsStr, OsString};
 use std::collections::BTreeMap;
 use std::sync::Mutex;
 use time::Timespec;
-use libc::{ENOENT,ENOTEMPTY};
+use libc::{ENOENT,ENOTEMPTY, c_int};
 use std::cmp;
 
 #[derive(Debug, Clone)]
@@ -81,11 +81,11 @@ impl FS {
     }
   }
 
-  fn get_entry(&self, path: &Path) -> Option<FSEntry> {
+  fn get_entry(&self, path: &Path) -> Result<FSEntry, c_int> {
     let entries = self.entries.lock().unwrap();
     match entries.get(&(path.to_path_buf())) {
-      Some(e) => Some(e.clone()),
-      None => None,
+      Some(e) => Ok(e.clone()),
+      None => Err(ENOENT),
     }
   }
 
@@ -111,6 +111,26 @@ impl FS {
 
     children
   }
+
+  fn modify_entry<F>(&self, path: &Path, closure: &F) -> ResultEmpty
+    where F : Fn(&mut FSEntry) {
+    let mut entry = try!(self.get_entry(path));
+    closure(&mut entry);
+    let mut entries = self.entries.lock().unwrap();
+    entries.insert(path.to_path_buf(), entry);
+    Ok(())
+  }
+
+  fn remove_entry(&self, path: &Path) {
+    let mut entries = self.entries.lock().unwrap();
+    entries.remove(path);
+  }
+
+  fn path_from_parts(&self, parent: &Path, name: &OsStr) -> PathBuf {
+    let mut path = parent.to_path_buf();
+    path.push(name);
+    path
+  }
 }
 
 impl FilesystemMT for FS {
@@ -118,25 +138,17 @@ impl FilesystemMT for FS {
     Ok(())
   }
 
-  fn opendir(&self, _req: RequestInfo, path: &Path, _flags: u32) -> ResultOpen {
-    println!("opendir: {:?}", path);
+  fn opendir(&self, _req: RequestInfo, _path: &Path, _flags: u32) -> ResultOpen {
     Ok((0,0))
   }
 
   fn getattr(&self, _req: RequestInfo, path: &Path, _fh: Option<u64>) -> ResultEntry {
-    println!("getattr {:?}", path);
-    let entry = match self.get_entry(path) {
-      Some(e) => e,
-      None => return Err(ENOENT),
-    };
-    println!("got entry {:?}", entry);
+    let entry = try!(self.get_entry(path));
     let time = time::get_time();
-
     Ok((time, entry.attrs()))
   }
 
   fn readdir(&self, _req: RequestInfo, path: &Path, _fh: u64) -> ResultReaddir {
-    println!("readdir {:?}", path);
     let mut dirlist = Vec::new();
     dirlist.push(DirectoryEntry{name: OsString::from("."), kind: FileType::Directory});
     dirlist.push(DirectoryEntry{name: OsString::from(".."), kind: FileType::Directory});
@@ -149,108 +161,59 @@ impl FilesystemMT for FS {
   }
 
   fn chmod(&self, _req: RequestInfo, path: &Path, _fh: Option<u64>, mode: u32) -> ResultEmpty {
-    let mut entry = match self.get_entry(path) {
-      Some(e) => e,
-      None => return Err(ENOENT),
-    };
-    entry.perm = mode;
-
-    let mut entries = self.entries.lock().unwrap();
-    entries.insert(path.to_path_buf(), entry);
-
-    Ok(())
+    self.modify_entry(path, &(|entry| {
+      entry.perm = mode;
+    }))
   }
 
   fn chown(&self, _req: RequestInfo, path: &Path, _fh: Option<u64>, uid: Option<u32>, gid: Option<u32>) -> ResultEmpty {
-    let mut entry = match self.get_entry(path) {
-      Some(e) => e,
-      None => return Err(ENOENT),
-    };
-    if let Some(uid) = uid {entry.uid = uid};
-    if let Some(gid) = gid {entry.gid = gid};
-
-    let mut entries = self.entries.lock().unwrap();
-    entries.insert(path.to_path_buf(), entry);
-
-    Ok(())
+    self.modify_entry(path, &(|entry| {
+      if let Some(uid) = uid {entry.uid = uid};
+      if let Some(gid) = gid {entry.gid = gid};
+    }))
   }
 
   fn utimens(&self, _req: RequestInfo, path: &Path, _fh: Option<u64>, atime: Option<Timespec>, mtime: Option<Timespec>) -> ResultEmpty {
-    println!("utimens {:?}", path);
-
-    let mut entry = match self.get_entry(path) {
-      Some(e) => e,
-      None => return Err(ENOENT),
-    };
-    if let Some(atime) = atime {entry.atime = atime};
-    if let Some(mtime) = mtime {entry.mtime = mtime};
-
-    let mut entries = self.entries.lock().unwrap();
-    entries.insert(path.to_path_buf(), entry);
-
-    Ok(())
+    self.modify_entry(path, &(|entry| {
+      if let Some(atime) = atime {entry.atime = atime};
+      if let Some(mtime) = mtime {entry.mtime = mtime};
+    }))
   }
 
   fn create(&self, _req: RequestInfo, parent: &Path, name: &OsStr, mode: u32, _flags: u32) -> ResultCreate {
-    let mut path = parent.to_path_buf();
-    path.push(name);
-    println!("create {:?}", path);
-
+    let path = self.path_from_parts(parent, name);
     let mut entry = FSEntry::new(FileType::RegularFile);
     entry.perm = mode;
-
     let created_entry = CreatedEntry {
       ttl: entry.ctime,
       attr: entry.attrs(),
       fh: 999,
       flags: entry.flags,
     };
-
     let mut entries = self.entries.lock().unwrap();
     entries.insert(path, entry);
-
     Ok(created_entry)
   }
 
   fn mkdir(&self, _req: RequestInfo, parent: &Path, name: &OsStr, mode: u32) -> ResultEntry {
-    let mut path = parent.to_path_buf();
-    path.push(name);
-    println!("create {:?}", path);
-
+    let path = self.path_from_parts(parent, name);
     let mut entry = FSEntry::new(FileType::Directory);
     entry.perm = mode;
-
     let created_dir = (entry.ctime, entry.attrs());
-
     let mut entries = self.entries.lock().unwrap();
     entries.insert(path, entry);
-
     Ok(created_dir)
   }
 
   fn truncate(&self, _req: RequestInfo, path: &Path, _fh: Option<u64>, size: u64) -> ResultEmpty {
-    let mut entry = match self.get_entry(path) {
-      Some(e) => e,
-      None => return Err(ENOENT),
-    };
-
-    let size = size as usize;
-    if size == entry.data.len() { return Ok(()) } // Nothing to do
-
-    entry.data.resize(size, 0);
-
-    let mut entries = self.entries.lock().unwrap();
-    entries.insert(path.to_path_buf(), entry);
-
-    Ok(())
+    self.modify_entry(path, &(|entry| {
+      let size = size as usize;
+      entry.data.resize(size, 0);
+    }))
   }
 
   fn write(&self, _req: RequestInfo, path: &Path, _fh: u64, offset: u64, data: Vec<u8>, _flags: u32) -> ResultWrite {
-    let mut entry = match self.get_entry(path) {
-      Some(e) => e,
-      None => return Err(ENOENT),
-    };
-
+    let mut entry = try!(self.get_entry(path));
     let len = data.len() as u32;
     let total_needed_size = (offset as usize) + data.len();
     if total_needed_size > entry.data.len() {
@@ -267,41 +230,24 @@ impl FilesystemMT for FS {
   }
 
   fn read(&self, _req: RequestInfo, path: &Path, _fh: u64, offset: u64, size: u32) -> ResultData {
-    println!("read {:?} {:?}", path, offset);
-
-    let entry = match self.get_entry(path) {
-      Some(e) => e,
-      None => return Err(ENOENT),
-    };
-
+    let entry = try!(self.get_entry(path));
     let start = offset as usize;
     let end = cmp::min(start + (size as usize), entry.data.len());
     Ok(entry.data[start..end].to_vec())
   }
 
   fn rmdir(&self, _req: RequestInfo, parent: &Path, name: &OsStr) -> ResultEmpty {
-    let mut path = parent.to_path_buf();
-    path.push(name);
-    println!("rmdir {:?}", path);
-
+    let path = self.path_from_parts(parent, name);
     if self.get_children(&path).len() > 0 {
       return Err(ENOTEMPTY)
     }
-
-    let mut entries = self.entries.lock().unwrap();
-    entries.remove(&path);
-
+    self.remove_entry(&path);
     Ok(())
   }
 
   fn unlink(&self, _req: RequestInfo, parent: &Path, name: &OsStr) -> ResultEmpty {
-    let mut path = parent.to_path_buf();
-    path.push(name);
-    println!("unlink {:?}", path);
-
-    let mut entries = self.entries.lock().unwrap();
-    entries.remove(&path);
-
+    let path = self.path_from_parts(parent, name);
+    self.remove_entry(&path);
     Ok(())
   }
 }
@@ -311,6 +257,7 @@ fn main() {
   let fs_mt = FuseMT::new(fs, 16);
   let path = "mnt".to_string();
   let options = [OsStr::new("-o"), OsStr::new("auto_unmount")];
+  println!("Starting filesystem in {:?}", path);
   match fuse_mt::mount(fs_mt, &path, &options[..]) {
     Ok(_) => {},
     Err(e) => eprintln!("FUSE error: {:?}", e),
