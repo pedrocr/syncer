@@ -240,10 +240,9 @@ impl FilesystemMT for FS {
       entry.data.resize(total_needed_size, 0);
     }
 
-    for i in 0..data.len() {
-      let off = offset as usize;
-      entry.data[off+i] = data[i];
-    }
+    let start = offset as usize;
+    let end = start + data.len();
+    entry.data[start..end].copy_from_slice(&data[..]);
 
     let mut entries = self.entries.lock().unwrap();
     entries.insert(path.to_path_buf(), entry);
