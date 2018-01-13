@@ -228,7 +228,7 @@ impl FilesystemMT for FS {
     Ok(created_dir)
   }
 
-  fn write(&self, _red: RequestInfo, path: &Path, _fh: u64, offset: u64, data: Vec<u8>, _flags: u32) -> ResultWrite {
+  fn write(&self, _req: RequestInfo, path: &Path, _fh: u64, offset: u64, data: Vec<u8>, _flags: u32) -> ResultWrite {
     let mut entry = match self.get_entry(path) {
       Some(e) => e,
       None => return Err(ENOENT),
@@ -240,9 +240,8 @@ impl FilesystemMT for FS {
       entry.data.resize(total_needed_size, 0);
     }
 
-    let start = offset as usize;
-    let end = start + data.len();
-    entry.data[start..end].copy_from_slice(&data[..]);
+    let off = offset as usize;
+    entry.data[off..off + data.len()].copy_from_slice(&data[..]);
 
     let mut entries = self.entries.lock().unwrap();
     entries.insert(path.to_path_buf(), entry);
@@ -250,7 +249,7 @@ impl FilesystemMT for FS {
     Ok(len)
   }
 
-  fn read(&self, _red: RequestInfo, path: &Path, _fh: u64, offset: u64, size: u32) -> ResultData {
+  fn read(&self, _req: RequestInfo, path: &Path, _fh: u64, offset: u64, size: u32) -> ResultData {
     println!("read {:?} {:?}", path, offset);
 
     let entry = match self.get_entry(path) {
@@ -263,7 +262,7 @@ impl FilesystemMT for FS {
     Ok(entry.data[start..end].to_vec())
   }
 
-  fn rmdir(&self, _red: RequestInfo, parent: &Path, name: &OsStr) -> ResultEmpty {
+  fn rmdir(&self, _req: RequestInfo, parent: &Path, name: &OsStr) -> ResultEmpty {
     let mut path = parent.to_path_buf();
     path.push(name);
     println!("rmdir {:?}", path);
@@ -278,7 +277,7 @@ impl FilesystemMT for FS {
     Ok(())
   }
 
-  fn unlink(&self, _red: RequestInfo, parent: &Path, name: &OsStr) -> ResultEmpty {
+  fn unlink(&self, _req: RequestInfo, parent: &Path, name: &OsStr) -> ResultEmpty {
     let mut path = parent.to_path_buf();
     path.push(name);
     println!("unlink {:?}", path);
