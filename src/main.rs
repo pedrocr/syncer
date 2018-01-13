@@ -116,14 +116,18 @@ impl FS {
     where F : Fn(&mut FSEntry) {
     let mut entry = try!(self.get_entry(path));
     closure(&mut entry);
-    let mut entries = self.entries.lock().unwrap();
-    entries.insert(path.to_path_buf(), entry);
+    self.insert_entry(path.to_path_buf(), entry);
     Ok(())
   }
 
   fn remove_entry(&self, path: &Path) {
     let mut entries = self.entries.lock().unwrap();
     entries.remove(path);
+  }
+
+  fn insert_entry(&self, path: PathBuf, entry: FSEntry) {
+    let mut entries = self.entries.lock().unwrap();
+    entries.insert(path, entry);
   }
 
   fn path_from_parts(&self, parent: &Path, name: &OsStr) -> PathBuf {
@@ -190,8 +194,7 @@ impl FilesystemMT for FS {
       fh: 999,
       flags: entry.flags,
     };
-    let mut entries = self.entries.lock().unwrap();
-    entries.insert(path, entry);
+    self.insert_entry(path, entry);
     Ok(created_entry)
   }
 
@@ -200,8 +203,7 @@ impl FilesystemMT for FS {
     let mut entry = FSEntry::new(FileType::Directory);
     entry.perm = mode;
     let created_dir = (entry.ctime, entry.attrs());
-    let mut entries = self.entries.lock().unwrap();
-    entries.insert(path, entry);
+    self.insert_entry(path, entry);
     Ok(created_dir)
   }
 
@@ -219,13 +221,9 @@ impl FilesystemMT for FS {
     if total_needed_size > entry.data.len() {
       entry.data.resize(total_needed_size, 0);
     }
-
     let off = offset as usize;
     entry.data[off..off + data.len()].copy_from_slice(&data[..]);
-
-    let mut entries = self.entries.lock().unwrap();
-    entries.insert(path.to_path_buf(), entry);
-
+    self.insert_entry(path.to_path_buf(), entry);
     Ok(len)
   }
 
