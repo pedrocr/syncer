@@ -7,7 +7,7 @@ use std::path::{Path,PathBuf};
 use std::ffi::{OsStr, OsString};
 use std::os::unix::ffi::OsStrExt;
 use std::collections::BTreeMap;
-use std::sync::Mutex;
+use std::sync::RwLock;
 use time::Timespec;
 use libc::{ENOENT,ENOTEMPTY, c_int};
 use std::cmp;
@@ -65,7 +65,7 @@ impl FSEntry {
 
 #[derive(Debug)]
 struct FS {
-  entries: Mutex<BTreeMap<PathBuf, FSEntry>>,
+  entries: RwLock<BTreeMap<PathBuf, FSEntry>>,
 }
 
 impl FS {
@@ -78,12 +78,12 @@ impl FS {
     entries.insert(PathBuf::from("/foo2"), FSEntry::new(FileType::Directory));
 
     FS {
-      entries: Mutex::new(entries),
+      entries: RwLock::new(entries),
     }
   }
 
   fn get_entry(&self, path: &Path) -> Result<FSEntry, c_int> {
-    let entries = self.entries.lock().unwrap();
+    let entries = self.entries.read().unwrap();
     match entries.get(&(path.to_path_buf())) {
       Some(e) => Ok(e.clone()),
       None => Err(ENOENT),
@@ -97,7 +97,7 @@ impl FS {
     // the sorting order would probably fix that.
 
     let mut children = Vec::new();
-    let entries = self.entries.lock().unwrap();
+    let entries = self.entries.read().unwrap();
 
     for child in entries.range(path.to_path_buf()..) {
       // It's the path itself, skip
@@ -122,12 +122,12 @@ impl FS {
   }
 
   fn remove_entry(&self, path: &Path) {
-    let mut entries = self.entries.lock().unwrap();
+    let mut entries = self.entries.write().unwrap();
     entries.remove(path);
   }
 
   fn insert_entry(&self, path: PathBuf, entry: FSEntry) {
-    let mut entries = self.entries.lock().unwrap();
+    let mut entries = self.entries.write().unwrap();
     entries.insert(path, entry);
   }
 
