@@ -263,6 +263,17 @@ impl FilesystemMT for FS {
     let end = cmp::min(start + (size as usize), entry.data.len());
     Ok(entry.data[start..end].to_vec())
   }
+
+  fn unlink(&self, _red: RequestInfo, parent: &Path, name: &OsStr) -> ResultEmpty {
+    let mut path = parent.to_path_buf();
+    path.push(name);
+    println!("unlink {:?}", path);
+
+    let mut entries = self.entries.lock().unwrap();
+    entries.remove(&path);
+
+    Ok(())
+  }
 }
 
 fn main() {
