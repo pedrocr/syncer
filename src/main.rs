@@ -12,7 +12,20 @@ use time::Timespec;
 use libc::{ENOENT,ENOTEMPTY, c_int};
 use std::cmp;
 
-#[derive(Debug, Clone)]
+#[derive(Clone)]
+struct FSBlock {
+  data: [u8; 4096],
+}
+
+impl FSBlock {
+  fn new() -> FSBlock {
+    FSBlock {
+      data: [0; 4096],
+    }
+  }
+}
+
+#[derive(Clone)]
 struct FSEntry {
   filetype: FileType,
   perm: u32,
@@ -23,7 +36,8 @@ struct FSEntry {
   atime: Timespec,
   mtime: Timespec,
   ctime: Timespec,
-  data: Vec<u8>,
+  size: u64,
+  blocks: Vec<FSBlock>,
 }
 
 impl FSEntry {
@@ -40,16 +54,16 @@ impl FSEntry {
       atime: time,
       mtime: time,
       ctime: time,
-      data: Vec::new(),
+      size: 0,
+      blocks: Vec::new(),
     }
   }
 
   fn attrs(&self) -> FileAttr {
-    let size = self.data.len() as u64;
-    let blocks = (size + 512 -1)/ 512;
+    let blocks = (self.size + 512 -1)/ 512;
 
     FileAttr {
-      size,
+      size: self.size,
       blocks,
       atime: self.atime,
       mtime: self.mtime,
@@ -66,7 +80,6 @@ impl FSEntry {
   }
 }
 
-#[derive(Debug)]
 struct FS {
   entries: RwLock<BTreeMap<PathBuf, FSEntry>>,
 }
@@ -214,8 +227,12 @@ impl FilesystemMT for FS {
   fn symlink(&self, _req: RequestInfo, parent: &Path, name: &OsStr, target: &Path) -> ResultEntry {
     let path = self.path_from_parts(parent, name);
     let mut entry = FSEntry::new(FileType::Symlink);
-    entry.data = target.as_os_str().as_bytes().to_vec();
+    let data = target.as_os_str().as_bytes();
+    let mut blockdata = [0; 4096];
+    blockdata[0..data.len()].copy_from_slice(data);
+    entry.blocks = vec![FSBlock{data: blockdata}];
     entry.perm = 0o777;
+    entry.size = data.len() as u64;
     let created_symlink = (entry.ctime, entry.attrs());
     self.insert_entry(path, entry);
     Ok(created_symlink)
@@ -223,34 +240,64 @@ impl FilesystemMT for FS {
 
   fn truncate(&self, _req: RequestInfo, path: &Path, _fh: Option<u64>, size: u64) -> ResultEmpty {
     self.modify_entry(path, &(|entry| {
-      let size = size as usize;
-      entry.data.resize(size, 0);
+      entry.size = size;
     }))
   }
 
   fn write(&self, _req: RequestInfo, path: &Path, _fh: u64, offset: u64, data: Vec<u8>, _flags: u32) -> ResultWrite {
-    let mut entry = try!(self.get_entry(path));
+    try!(self.get_entry(path)); // Make sure it exists and return ENOENT if not
+    let mut entries = self.entries.write().unwrap();
+    let entry = entries.entry(path.to_path_buf()).or_insert(FSEntry::new(FileType::RegularFile));
+
     let len = data.len() as u32;
-    let total_needed_size = (offset as usize) + data.len();
-    if total_needed_size > entry.data.len() {
-      entry.data.resize(total_needed_size, 0);
+    entry.size = cmp::max(entry.size, offset + data.len() as u64);
+    let total_needed_blocks = ((entry.size + 4096 - 1) / 4096) as usize;
+    if total_needed_blocks > entry.blocks.len() {
+      entry.blocks.resize(total_needed_blocks, FSBlock::new());
     }
-    let off = offset as usize;
-    entry.data[off..off + data.len()].copy_from_slice(&data[..]);
-    self.insert_entry(path.to_path_buf(), entry);
+
+    let start = offset as usize;
+    let end = start + data.len();
+    let mut written = 0;
+    let startblock = start/4096;
+    let endblock = (end + 4096 - 1)/4096;
+    for (i,block) in entry.blocks[startblock..endblock].iter_mut().enumerate() {
+      let i = i+startblock;
+      let bstart = cmp::max(start, i*4096);
+      let bend = cmp::min(end, (i+1)*4096);
+      let bsize = bend - bstart;
+      let boffset = bstart - i*4096;
+      block.data[boffset..boffset+bsize].copy_from_slice(&data[written..written+bsize]);
+      written += bsize;
+    }
+    assert!(written == data.len());
     Ok(len)
   }
 
   fn read(&self, _req: RequestInfo, path: &Path, _fh: u64, offset: u64, size: u32) -> ResultData {
     let entry = try!(self.get_entry(path));
     let start = offset as usize;
-    let end = cmp::min(start + (size as usize), entry.data.len());
-    Ok(entry.data[start..end].to_vec())
+    let end = cmp::min(start + (size as usize), entry.size as usize);
+    let mut data = vec![0; end - start];
+    let mut written = 0;
+    let startblock = start/4096;
+    let endblock = (end + 4096 - 1)/4096;
+    for i in startblock..endblock {
+      let block = &entry.blocks[i];
+      let bstart = cmp::max(start, i*4096);
+      let bend = cmp::min(end, (i+1)*4096 - 1);
+      let bsize = bend - bstart;
+      let boffset = bstart - i*4096;
+      data[written..written+bsize].copy_from_slice(&block.data[boffset..boffset+bsize]);
+      written += bsize;
+    }
+    assert!(written == data.len());
+    Ok(data)
   }
 
   fn readlink(&self, _req: RequestInfo, path: &Path) -> ResultData {
     let entry = try!(self.get_entry(path));
-    Ok(entry.data.clone())
+    Ok(entry.blocks[0].data[0..entry.size as usize].to_vec())
   }
 
   fn rmdir(&self, _req: RequestInfo, parent: &Path, name: &OsStr) -> ResultEmpty {
