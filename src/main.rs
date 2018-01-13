@@ -8,7 +8,7 @@ use std::ffi::{OsStr, OsString};
 use std::collections::BTreeMap;
 use std::sync::Mutex;
 use time::Timespec;
-use libc::ENOENT;
+use libc::{ENOENT,ENOTEMPTY};
 use std::cmp;
 
 #[derive(Debug, Clone)]
@@ -262,6 +262,21 @@ impl FilesystemMT for FS {
     let start = offset as usize;
     let end = cmp::min(start + (size as usize), entry.data.len());
     Ok(entry.data[start..end].to_vec())
+  }
+
+  fn rmdir(&self, _red: RequestInfo, parent: &Path, name: &OsStr) -> ResultEmpty {
+    let mut path = parent.to_path_buf();
+    path.push(name);
+    println!("rmdir {:?}", path);
+
+    if self.get_children(&path).len() > 0 {
+      return Err(ENOTEMPTY)
+    }
+
+    let mut entries = self.entries.lock().unwrap();
+    entries.remove(&path);
+
+    Ok(())
   }
 
   fn unlink(&self, _red: RequestInfo, parent: &Path, name: &OsStr) -> ResultEmpty {
