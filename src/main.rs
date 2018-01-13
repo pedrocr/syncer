@@ -5,6 +5,7 @@ extern crate libc;
 use fuse_mt::*;
 use std::path::{Path,PathBuf};
 use std::ffi::{OsStr, OsString};
+use std::os::unix::ffi::OsStrExt;
 use std::collections::BTreeMap;
 use std::sync::Mutex;
 use time::Timespec;
@@ -207,6 +208,16 @@ impl FilesystemMT for FS {
     Ok(created_dir)
   }
 
+  fn symlink(&self, _req: RequestInfo, parent: &Path, name: &OsStr, target: &Path) -> ResultEntry {
+    let path = self.path_from_parts(parent, name);
+    let mut entry = FSEntry::new(FileType::Symlink);
+    entry.data = target.as_os_str().as_bytes().to_vec();
+    entry.perm = 0o777;
+    let created_symlink = (entry.ctime, entry.attrs());
+    self.insert_entry(path, entry);
+    Ok(created_symlink)
+  }
+
   fn truncate(&self, _req: RequestInfo, path: &Path, _fh: Option<u64>, size: u64) -> ResultEmpty {
     self.modify_entry(path, &(|entry| {
       let size = size as usize;
@@ -232,6 +243,11 @@ impl FilesystemMT for FS {
     let start = offset as usize;
     let end = cmp::min(start + (size as usize), entry.data.len());
     Ok(entry.data[start..end].to_vec())
+  }
+
+  fn readlink(&self, _req: RequestInfo, path: &Path) -> ResultData {
+    let entry = try!(self.get_entry(path));
+    Ok(entry.data.clone())
   }
 
   fn rmdir(&self, _req: RequestInfo, parent: &Path, name: &OsStr) -> ResultEmpty {
