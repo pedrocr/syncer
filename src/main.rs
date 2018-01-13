@@ -45,9 +45,12 @@ impl FSEntry {
   }
 
   fn attrs(&self) -> FileAttr {
+    let size = self.data.len() as u64;
+    let blocks = (size + 512 -1)/ 512;
+
     FileAttr {
-      size: self.data.len() as u64,
-      blocks: 0,
+      size,
+      blocks,
       atime: self.atime,
       mtime: self.mtime,
       ctime: self.ctime,
