@@ -147,6 +147,14 @@ impl FS {
     }
   }
 
+  fn with_path_optional_handle<F,T>(&self, path: &Path, fh: Option<u64>, closure: &F) -> Result<T, c_int>
+    where F : Fn(&FSEntry) -> T {
+    match fh {
+      Some(fh) => self.with_handle(fh, closure),
+      None => self.with_path(path, closure),
+    }
+  }
+
   fn with_path<F,T>(&self, path: &Path, closure: &F) -> Result<T, c_int>
     where F : Fn(&FSEntry) -> T {
     let node = {
@@ -177,6 +185,14 @@ impl FS {
     match nodes.get(&node) {
       Some(e) => Ok(closure(e)),
       None => return Err(libc::ENOENT),
+    }
+  }
+
+  fn modify_path_optional_handle<F,T>(&self, path: &Path, fh: Option<u64>, closure: &F) -> Result<T, c_int>
+    where F : Fn(&mut FSEntry) -> T {
+    match fh {
+      Some(fh) => self.modify_handle(fh, closure),
+      None => self.modify_path(path, closure),
     }
   }
 
@@ -308,8 +324,8 @@ impl FilesystemMT for FS {
     Ok((handle, flags))
   }
 
-  fn getattr(&self, _req: RequestInfo, path: &Path, _fh: Option<u64>) -> ResultEntry {
-    let attrs = try!(self.with_path(path, &(|entry| entry.attrs())));
+  fn getattr(&self, _req: RequestInfo, path: &Path, fh: Option<u64>) -> ResultEntry {
+    let attrs = try!(self.with_path_optional_handle(path, fh, &(|entry| entry.attrs())));
     let time = time::get_time();
     Ok((time, attrs))
   }
@@ -326,21 +342,21 @@ impl FilesystemMT for FS {
     Ok(dirlist)
   }
 
-  fn chmod(&self, _req: RequestInfo, path: &Path, _fh: Option<u64>, mode: u32) -> ResultEmpty {
-    self.modify_path(path, &(|entry| {
+  fn chmod(&self, _req: RequestInfo, path: &Path, fh: Option<u64>, mode: u32) -> ResultEmpty {
+    self.modify_path_optional_handle(path, fh, &(|entry| {
       entry.perm = mode;
     }))
   }
 
-  fn chown(&self, _req: RequestInfo, path: &Path, _fh: Option<u64>, uid: Option<u32>, gid: Option<u32>) -> ResultEmpty {
-    self.modify_path(path, &(|entry| {
+  fn chown(&self, _req: RequestInfo, path: &Path, fh: Option<u64>, uid: Option<u32>, gid: Option<u32>) -> ResultEmpty {
+    self.modify_path_optional_handle(path, fh, &(|entry| {
       if let Some(uid) = uid {entry.uid = uid};
       if let Some(gid) = gid {entry.gid = gid};
     }))
   }
 
-  fn utimens(&self, _req: RequestInfo, path: &Path, _fh: Option<u64>, atime: Option<Timespec>, mtime: Option<Timespec>) -> ResultEmpty {
-    self.modify_path(path, &(|entry| {
+  fn utimens(&self, _req: RequestInfo, path: &Path, fh: Option<u64>, atime: Option<Timespec>, mtime: Option<Timespec>) -> ResultEmpty {
+    self.modify_path_optional_handle(path, fh, &(|entry| {
       if let Some(atime) = atime {entry.atime = atime};
       if let Some(mtime) = mtime {entry.mtime = mtime};
     }))
@@ -393,8 +409,8 @@ impl FilesystemMT for FS {
     self.with_node(node.0, &(|entry| (entry.ctime, entry.attrs())))
   }
 
-  fn truncate(&self, _req: RequestInfo, path: &Path, _fh: Option<u64>, size: u64) -> ResultEmpty {
-    self.modify_path(path, &(|entry| {
+  fn truncate(&self, _req: RequestInfo, path: &Path, fh: Option<u64>, size: u64) -> ResultEmpty {
+    self.modify_path_optional_handle(path, fh, &(|entry| {
       entry.size = size;
     }))
   }
