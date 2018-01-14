@@ -112,7 +112,7 @@ impl FSEntry {
     for i in startblock..endblock {
       let block = &self.blocks[i];
       let bstart = cmp::max(start, i*4096);
-      let bend = cmp::min(end, (i+1)*4096 - 1);
+      let bend = cmp::min(end, (i+1)*4096);
       let bsize = bend - bstart;
       let boffset = bstart - i*4096;
       data[written..written+bsize].copy_from_slice(&block.data[boffset..boffset+bsize]);
