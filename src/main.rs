@@ -3,10 +3,10 @@ extern crate fuse_mt;
 extern crate libc;
 
 use fuse_mt::*;
-use std::path::{Path,PathBuf};
+use std::path::Path;
 use std::ffi::{OsStr, OsString};
 use std::os::unix::ffi::OsStrExt;
-use std::collections::{BTreeMap, HashMap};
+use std::collections::HashMap;
 use std::sync::{RwLock, Mutex};
 use time::Timespec;
 use libc::c_int;
@@ -37,6 +37,7 @@ struct FSEntry {
   ctime: Timespec,
   size: u64,
   blocks: Vec<FSBlock>,
+  children: HashMap<OsString, (u64, FileType)>,
 }
 
 impl FSEntry {
@@ -55,6 +56,7 @@ impl FSEntry {
       ctime: time,
       size: 0,
       blocks: Vec::new(),
+      children: HashMap::new(),
     }
   }
 
@@ -75,6 +77,31 @@ impl FSEntry {
       gid: self.gid,
       rdev: self.rdev,
       flags: self.flags,      
+    }
+  }
+
+  fn children(&self) -> Vec<DirectoryEntry> {
+    assert!(self.filetype == FileType::Directory);
+    let mut out = Vec::new();
+    out.push(DirectoryEntry{name: OsString::from("."), kind: FileType::Directory});
+    out.push(DirectoryEntry{name: OsString::from(".."), kind: FileType::Directory});
+    for (key, val) in self.children.iter() {
+      out.push(DirectoryEntry{
+        name: key.clone(),
+        kind: val.1,
+      });
+    }
+    out
+  }
+
+  fn add_child(&mut self, name: &OsStr, node: (u64, FileType)) {
+    self.children.insert(name.to_os_string(), node);
+  }
+
+  fn remove_child(&mut self, name: &OsStr) -> Result<(u64, FileType), c_int> {
+    match self.children.remove(name) {
+      None => Err(libc::ENOENT),
+      Some(c) => Ok(c),
     }
   }
 
@@ -129,7 +156,6 @@ struct Handle {
 }
 
 struct FS {
-  entries: RwLock<BTreeMap<PathBuf,(u64,FileType)>>,
   nodes: RwLock<HashMap<u64,FSEntry>>,
   node_counter: Mutex<u64>,
   handles: RwLock<HashMap<u64,Handle>>,
@@ -138,9 +164,11 @@ struct FS {
 
 impl FS {
   fn new() -> FS {
+    let mut nodes = HashMap::new();
+    // Root node is always 0
+    nodes.insert(0, FSEntry::new(FileType::Directory));
     FS {
-      entries: RwLock::new(BTreeMap::new()),
-      nodes: RwLock::new(HashMap::new()),
+      nodes: RwLock::new(nodes),
       node_counter: Mutex::new(0),
       handles: RwLock::new(HashMap::new()),
       handle_counter: Mutex::new(0),
@@ -157,14 +185,7 @@ impl FS {
 
   fn with_path<F,T>(&self, path: &Path, closure: &F) -> Result<T, c_int>
     where F : Fn(&FSEntry) -> T {
-    let node = {
-      let entries = self.entries.read().unwrap();
-      match entries.get(&(path.to_path_buf())) {
-        Some(e) => e.0,
-        None => return Err(libc::ENOENT),
-      }
-    };
-    self.with_node(node, closure)
+    self.with_node(try!(self.find_node(path)), closure)
   }
 
   fn with_handle<F,T>(&self, handle: u64, closure: &F) -> Result<T, c_int>
@@ -198,14 +219,7 @@ impl FS {
 
   fn modify_path<F,T>(&self, path: &Path, closure: &F) -> Result<T, c_int>
     where F : Fn(&mut FSEntry) -> T {
-    let node = {
-      let entries = self.entries.read().unwrap();
-      match entries.get(&(path.to_path_buf())) {
-        Some(e) => e.0,
-        None => return Err(libc::ENOENT),
-      }
-    };
-    self.modify_node(node, closure)
+    self.modify_node(try!(self.find_node(path)), closure)
   }
 
   fn modify_handle<F,T>(&self, handle: u64, closure: &F) -> Result<T, c_int>
@@ -229,52 +243,23 @@ impl FS {
     })
   }
 
-  fn get_children(&self, path: &Path) -> Vec<(PathBuf, FileType)> {
-    // List all the children of a given path by iterating the BTreeMap
-    // This isn't particularly efficient for directories with a lot of children
-    // directories because the sorting order results in a depth first search. Fixing
-    // the sorting order would probably fix that.
-
-    let mut children = Vec::new();
-    let entries = self.entries.read().unwrap();
-
-    for child in entries.range(path.to_path_buf()..) {
-      // It's the path itself, skip
-      if child.0 == path { continue }
-      // This is not a child of the dir
-      if child.0.parent().unwrap() != path { continue }
-      // We're past the dir itself
-      if !child.0.starts_with(path) { break }
-
-      children.push((child.0.clone(), (child.1).1));
+  fn find_node(&self, path: &Path) -> Result<u64, c_int> {
+    let mut nodenum = 0; // Start with the root node
+    let mut iterator = path.iter();
+    iterator.next(); // Skip the root as that's already nodenum 0
+    for elem in iterator {
+      let nodes = self.nodes.read().unwrap();
+      match nodes.get(&nodenum) {
+        None => return Err(libc::ENOENT),
+        Some(node) => {
+          match node.children.get(elem) {
+            None => return Err(libc::ENOENT),
+            Some(&(num,_)) => nodenum = num,
+          }
+        },
+      }
     }
-
-    children
-  }
-
-  fn remove_entry(&self, path: &Path) -> Option<(u64,FileType)> {
-    let mut entries = self.entries.write().unwrap();
-    entries.remove(path)
-  }
-
-  fn find_node(&self, path: &Path) -> Option<(u64,FileType)> {
-    let entries = self.entries.read().unwrap();
-    match entries.get(path) {
-      Some(&e) => Some(e),
-      None => None,
-    }
-  }
-
-  fn link_entry(&self, path: PathBuf, node: (u64, FileType)) {
-    let mut entries = self.entries.write().unwrap();
-    entries.insert(path, node);
-  }
-
-  fn insert_entry(&self, path: PathBuf, entry: FSEntry) {
-    let filetype = entry.filetype;
-    let node = self.create_node(entry);
-    let mut entries = self.entries.write().unwrap();
-    entries.insert(path, (node, filetype));
+    Ok(nodenum)
   }
 
   fn create_node(&self, entry: FSEntry) -> u64 {
@@ -303,12 +288,6 @@ impl FS {
     let mut handles = self.handles.write().unwrap();
     handles.remove(&handle);
   }
-
-  fn path_from_parts(&self, parent: &Path, name: &OsStr) -> PathBuf {
-    let mut path = parent.to_path_buf();
-    path.push(name);
-    path
-  }
 }
 
 impl FilesystemMT for FS {
@@ -321,11 +300,8 @@ impl FilesystemMT for FS {
   }
 
   fn open(&self, _req: RequestInfo, path: &Path, flags: u32) -> ResultOpen {
-    let node = match self.find_node(path) {
-      Some(node) => node,
-      None => return Err(libc::ENOENT),
-    };
-    let handle = self.create_handle(Handle{node: node.0, _flags: flags,});
+    let node = try!(self.find_node(path));
+    let handle = self.create_handle(Handle{node: node, _flags: flags,});
     Ok((handle, flags))
   }
 
@@ -341,15 +317,8 @@ impl FilesystemMT for FS {
   }
 
   fn readdir(&self, _req: RequestInfo, path: &Path, _fh: u64) -> ResultReaddir {
-    let mut dirlist = Vec::new();
-    dirlist.push(DirectoryEntry{name: OsString::from("."), kind: FileType::Directory});
-    dirlist.push(DirectoryEntry{name: OsString::from(".."), kind: FileType::Directory});
-    for child in self.get_children(path) {
-      let name = OsString::from(child.0.file_name().unwrap());
-      let kind = child.1;
-      dirlist.push(DirectoryEntry{name, kind,});    
-    }
-    Ok(dirlist)
+    let children = try!(self.with_path(path, &(|node| node.children())));
+    Ok(children)
   }
 
   fn chmod(&self, _req: RequestInfo, path: &Path, fh: Option<u64>, mode: u32) -> ResultEmpty {
@@ -372,31 +341,34 @@ impl FilesystemMT for FS {
     }))
   }
 
-  fn create(&self, _req: RequestInfo, parent: &Path, name: &OsStr, mode: u32, _flags: u32) -> ResultCreate {
-    let path = self.path_from_parts(parent, name);
+  fn create(&self, _req: RequestInfo, parent: &Path, name: &OsStr, mode: u32, flags: u32) -> ResultCreate {
+    let node = try!(self.find_node(parent));
     let mut entry = FSEntry::new(FileType::RegularFile);
     entry.perm = mode;
-    let created_entry = CreatedEntry {
+    let mut created_entry = CreatedEntry {
       ttl: entry.ctime,
       attr: entry.attrs(),
-      fh: 999,
+      fh: 0,
       flags: entry.flags,
     };
-    self.insert_entry(path, entry);
+    let newnode = self.create_node(entry);
+    created_entry.fh = self.create_handle(Handle{node: newnode, _flags: flags,});
+    try!(self.modify_node(node, &(|parent| parent.add_child(name, (newnode, FileType::RegularFile)))));
     Ok(created_entry)
   }
 
   fn mkdir(&self, _req: RequestInfo, parent: &Path, name: &OsStr, mode: u32) -> ResultEntry {
-    let path = self.path_from_parts(parent, name);
+    let node = try!(self.find_node(parent));
     let mut entry = FSEntry::new(FileType::Directory);
     entry.perm = mode;
     let created_dir = (entry.ctime, entry.attrs());
-    self.insert_entry(path, entry);
+    let newnode = self.create_node(entry);
+    try!(self.modify_node(node, &(|parent| parent.add_child(name, (newnode, FileType::RegularFile)))));
     Ok(created_dir)
   }
 
   fn symlink(&self, _req: RequestInfo, parent: &Path, name: &OsStr, target: &Path) -> ResultEntry {
-    let path = self.path_from_parts(parent, name);
+    let node = try!(self.find_node(parent));
     let mut entry = FSEntry::new(FileType::Symlink);
     let data = target.as_os_str().as_bytes();
     let mut blockdata = [0; 4096];
@@ -405,18 +377,9 @@ impl FilesystemMT for FS {
     entry.perm = 0o777;
     entry.size = data.len() as u64;
     let created_symlink = (entry.ctime, entry.attrs());
-    self.insert_entry(path, entry);
+    let newnode = self.create_node(entry);
+    try!(self.modify_node(node, &(|parent| parent.add_child(name, (newnode, FileType::Symlink)))));
     Ok(created_symlink)
-  }
-
-  fn link(&self, _req: RequestInfo, path: &Path, newparent: &Path, newname: &OsStr) -> ResultEntry {
-    let newpath = self.path_from_parts(newparent, newname);
-    let node = match self.find_node(&path) {
-      Some(node) => node,
-      None => return Err(libc::ENOENT),
-    };
-    self.link_entry(newpath, node);
-    self.with_node(node.0, &(|entry| (entry.ctime, entry.attrs())))
   }
 
   fn truncate(&self, _req: RequestInfo, path: &Path, fh: Option<u64>, size: u64) -> ResultEmpty {
@@ -442,39 +405,27 @@ impl FilesystemMT for FS {
   }
 
   fn rmdir(&self, _req: RequestInfo, parent: &Path, name: &OsStr) -> ResultEmpty {
-    let path = self.path_from_parts(parent, name);
-    if self.get_children(&path).len() > 0 {
-      return Err(libc::ENOTEMPTY)
-    }
-    self.remove_entry(&path);
+    try!(try!(self.modify_path(parent, &(|parent| {
+      // FIXME: need to check that dir is empty first
+      parent.remove_child(name)
+    }))));
     Ok(())
   }
 
   fn unlink(&self, _req: RequestInfo, parent: &Path, name: &OsStr) -> ResultEmpty {
-    let path = self.path_from_parts(parent, name);
-    self.remove_entry(&path);
+    try!(try!(self.modify_path(parent, &(|parent| parent.remove_child(name)))));
     Ok(())
   }
 
   fn rename(&self, _req: RequestInfo, parent: &Path, name: &OsStr, newparent: &Path, newname: &OsStr) -> ResultEmpty {
-    let path = self.path_from_parts(parent, name);
-    let newpath = self.path_from_parts(newparent, newname);
-    match self.remove_entry(&path) {
-      Some(node) => self.link_entry(newpath, node),
-      None => return Err(libc::ENOENT),
-    };
+    let node = try!(try!(self.modify_path(parent, &(|parent| parent.remove_child(name)))));
+    try!(self.modify_path(newparent, &(|newparent| newparent.add_child(newname, node))));
     Ok(())
   }
 }
 
 fn main() {
   let fs = FS::new();
-  fs.insert_entry(PathBuf::from("/"), FSEntry::new(FileType::Directory));
-  fs.insert_entry(PathBuf::from("/foo"), FSEntry::new(FileType::Directory));
-  fs.insert_entry(PathBuf::from("/foo/bar"), FSEntry::new(FileType::RegularFile));
-  fs.insert_entry(PathBuf::from("/foo/baz"), FSEntry::new(FileType::RegularFile));
-  fs.insert_entry(PathBuf::from("/foo2"), FSEntry::new(FileType::Directory));
-
   let fs_mt = FuseMT::new(fs, 16);
   let path = "mnt".to_string();
   let options = [OsStr::new("-o"), OsStr::new("auto_unmount")];
