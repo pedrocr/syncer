@@ -405,8 +405,14 @@ impl FilesystemMT for FS {
   }
 
   fn rmdir(&self, _req: RequestInfo, parent: &Path, name: &OsStr) -> ResultEmpty {
+    let mut path = parent.to_path_buf();
+    path.push(name);
+
+    try!(try!(self.with_path(&path, &(|dir| {
+      if dir.children.len() == 0 {Ok(())} else {Err(libc::ENOTEMPTY)}
+    }))));
+
     try!(try!(self.modify_path(parent, &(|parent| {
-      // FIXME: need to check that dir is empty first
       parent.remove_child(name)
     }))));
     Ok(())
