@@ -9,7 +9,7 @@ use std::os::unix::ffi::OsStrExt;
 use std::collections::{BTreeMap, HashMap};
 use std::sync::{RwLock, Mutex};
 use time::Timespec;
-use libc::{ENOENT,ENOTEMPTY, c_int};
+use libc::c_int;
 use std::cmp;
 
 #[derive(Clone)]
@@ -147,13 +147,13 @@ impl FS {
     }
   }
 
-  fn with_entry<F,T>(&self, path: &Path, closure: &F) -> Result<T, c_int>
+  fn with_path<F,T>(&self, path: &Path, closure: &F) -> Result<T, c_int>
     where F : Fn(&FSEntry) -> T {
     let node = {
       let entries = self.entries.read().unwrap();
       match entries.get(&(path.to_path_buf())) {
         Some(e) => e.0,
-        None => return Err(ENOENT),
+        None => return Err(libc::ENOENT),
       }
     };
     self.with_node(node, closure)
@@ -165,7 +165,7 @@ impl FS {
       let handles = self.handles.read().unwrap();
       match handles.get(&handle) {
         Some(h) => h.node,
-        None => return Err(ENOENT),
+        None => return Err(libc::ENOENT),
       }
     };
     self.with_node(node, closure)
@@ -176,17 +176,17 @@ impl FS {
     let nodes = self.nodes.read().unwrap();
     match nodes.get(&node) {
       Some(e) => Ok(closure(e)),
-      None => return Err(ENOENT),
+      None => return Err(libc::ENOENT),
     }
   }
 
-  fn modify_entry<F,T>(&self, path: &Path, closure: &F) -> Result<T, c_int>
+  fn modify_path<F,T>(&self, path: &Path, closure: &F) -> Result<T, c_int>
     where F : Fn(&mut FSEntry) -> T {
     let node = {
       let entries = self.entries.read().unwrap();
       match entries.get(&(path.to_path_buf())) {
         Some(e) => e.0,
-        None => return Err(ENOENT),
+        None => return Err(libc::ENOENT),
       }
     };
     self.modify_node(node, closure)
@@ -198,7 +198,7 @@ impl FS {
       let handles = self.handles.read().unwrap();
       match handles.get(&handle) {
         Some(h) => h.node,
-        None => return Err(ENOENT),
+        None => return Err(libc::ENOENT),
       }
     };
     self.modify_node(node, closure)
@@ -209,7 +209,7 @@ impl FS {
     let mut nodes = self.nodes.write().unwrap();
     Ok(match nodes.get_mut(&node) {
       Some(mut entry) => closure(&mut entry),
-      None => return Err(ENOENT),
+      None => return Err(libc::ENOENT),
     })
   }
 
@@ -302,15 +302,14 @@ impl FilesystemMT for FS {
   fn open(&self, _req: RequestInfo, path: &Path, flags: u32) -> ResultOpen {
     let node = match self.find_node(path) {
       Some(node) => node,
-      None => return Err(ENOENT),
+      None => return Err(libc::ENOENT),
     };
     let handle = self.create_handle(Handle{node: node.0, _flags: flags,});
     Ok((handle, flags))
   }
 
   fn getattr(&self, _req: RequestInfo, path: &Path, _fh: Option<u64>) -> ResultEntry {
-    println!("getattr {:?}", path);
-    let attrs = try!(self.with_entry(path, &(|entry| entry.attrs())));
+    let attrs = try!(self.with_path(path, &(|entry| entry.attrs())));
     let time = time::get_time();
     Ok((time, attrs))
   }
@@ -328,20 +327,20 @@ impl FilesystemMT for FS {
   }
 
   fn chmod(&self, _req: RequestInfo, path: &Path, _fh: Option<u64>, mode: u32) -> ResultEmpty {
-    self.modify_entry(path, &(|entry| {
+    self.modify_path(path, &(|entry| {
       entry.perm = mode;
     }))
   }
 
   fn chown(&self, _req: RequestInfo, path: &Path, _fh: Option<u64>, uid: Option<u32>, gid: Option<u32>) -> ResultEmpty {
-    self.modify_entry(path, &(|entry| {
+    self.modify_path(path, &(|entry| {
       if let Some(uid) = uid {entry.uid = uid};
       if let Some(gid) = gid {entry.gid = gid};
     }))
   }
 
   fn utimens(&self, _req: RequestInfo, path: &Path, _fh: Option<u64>, atime: Option<Timespec>, mtime: Option<Timespec>) -> ResultEmpty {
-    self.modify_entry(path, &(|entry| {
+    self.modify_path(path, &(|entry| {
       if let Some(atime) = atime {entry.atime = atime};
       if let Some(mtime) = mtime {entry.mtime = mtime};
     }))
@@ -349,7 +348,6 @@ impl FilesystemMT for FS {
 
   fn create(&self, _req: RequestInfo, parent: &Path, name: &OsStr, mode: u32, _flags: u32) -> ResultCreate {
     let path = self.path_from_parts(parent, name);
-    println!("create {:?}", path);
     let mut entry = FSEntry::new(FileType::RegularFile);
     entry.perm = mode;
     let created_entry = CreatedEntry {
@@ -389,14 +387,14 @@ impl FilesystemMT for FS {
     let newpath = self.path_from_parts(newparent, newname);
     let node = match self.find_node(&path) {
       Some(node) => node,
-      None => return Err(ENOENT),
+      None => return Err(libc::ENOENT),
     };
     self.link_entry(newpath, node);
     self.with_node(node.0, &(|entry| (entry.ctime, entry.attrs())))
   }
 
   fn truncate(&self, _req: RequestInfo, path: &Path, _fh: Option<u64>, size: u64) -> ResultEmpty {
-    self.modify_entry(path, &(|entry| {
+    self.modify_path(path, &(|entry| {
       entry.size = size;
     }))
   }
@@ -414,13 +412,13 @@ impl FilesystemMT for FS {
   }
 
   fn readlink(&self, _req: RequestInfo, path: &Path) -> ResultData {
-    self.with_entry(path, &(|entry| entry.blocks[0].data[0..entry.size as usize].to_vec()))
+    self.with_path(path, &(|entry| entry.blocks[0].data[0..entry.size as usize].to_vec()))
   }
 
   fn rmdir(&self, _req: RequestInfo, parent: &Path, name: &OsStr) -> ResultEmpty {
     let path = self.path_from_parts(parent, name);
     if self.get_children(&path).len() > 0 {
-      return Err(ENOTEMPTY)
+      return Err(libc::ENOTEMPTY)
     }
     self.remove_entry(&path);
     Ok(())
@@ -432,12 +430,12 @@ impl FilesystemMT for FS {
     Ok(())
   }
 
-  fn rename(&self, _red: RequestInfo, parent: &Path, name: &OsStr, newparent: &Path, newname: &OsStr) -> ResultEmpty {
+  fn rename(&self, _req: RequestInfo, parent: &Path, name: &OsStr, newparent: &Path, newname: &OsStr) -> ResultEmpty {
     let path = self.path_from_parts(parent, name);
     let newpath = self.path_from_parts(newparent, newname);
     match self.remove_entry(&path) {
       Some(node) => self.link_entry(newpath, node),
-      None => return Err(ENOENT),
+      None => return Err(libc::ENOENT),
     };
     Ok(())
   }
