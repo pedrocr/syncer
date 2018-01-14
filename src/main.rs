@@ -123,10 +123,17 @@ impl FSEntry {
   }
 }
 
+struct Handle {
+  node: u64,
+  _flags: u32,
+}
+
 struct FS {
   entries: RwLock<BTreeMap<PathBuf,(u64,FileType)>>,
   nodes: RwLock<HashMap<u64,FSEntry>>,
   node_counter: Mutex<u64>,
+  handles: RwLock<HashMap<u64,Handle>>,
+  handle_counter: Mutex<u64>,
 }
 
 impl FS {
@@ -135,6 +142,8 @@ impl FS {
       entries: RwLock::new(BTreeMap::new()),
       nodes: RwLock::new(HashMap::new()),
       node_counter: Mutex::new(0),
+      handles: RwLock::new(HashMap::new()),
+      handle_counter: Mutex::new(0),
     }
   }
 
@@ -144,6 +153,18 @@ impl FS {
       let entries = self.entries.read().unwrap();
       match entries.get(&(path.to_path_buf())) {
         Some(e) => e.0,
+        None => return Err(ENOENT),
+      }
+    };
+    self.with_node(node, closure)
+  }
+
+  fn with_handle<F,T>(&self, handle: u64, closure: &F) -> Result<T, c_int>
+    where F : Fn(&FSEntry) -> T {
+    let node = {
+      let handles = self.handles.read().unwrap();
+      match handles.get(&handle) {
+        Some(h) => h.node,
         None => return Err(ENOENT),
       }
     };
@@ -168,6 +189,23 @@ impl FS {
         None => return Err(ENOENT),
       }
     };
+    self.modify_node(node, closure)
+  }
+
+  fn modify_handle<F,T>(&self, handle: u64, closure: &F) -> Result<T, c_int>
+    where F : Fn(&mut FSEntry) -> T {
+    let node = {
+      let handles = self.handles.read().unwrap();
+      match handles.get(&handle) {
+        Some(h) => h.node,
+        None => return Err(ENOENT),
+      }
+    };
+    self.modify_node(node, closure)
+  }
+
+  fn modify_node<F,T>(&self, node: u64, closure: &F) -> Result<T, c_int>
+    where F : Fn(&mut FSEntry) -> T {
     let mut nodes = self.nodes.write().unwrap();
     Ok(match nodes.get_mut(&node) {
       Some(mut entry) => closure(&mut entry),
@@ -234,6 +272,17 @@ impl FS {
     node
   }
 
+  fn create_handle(&self, handle: Handle) -> u64 {
+    let count = {
+      let mut counter = self.handle_counter.lock().unwrap();
+      *counter += 1;
+      *counter
+    };
+    let mut handles = self.handles.write().unwrap();
+    handles.insert(count, handle);
+    count
+  }
+
   fn path_from_parts(&self, parent: &Path, name: &OsStr) -> PathBuf {
     let mut path = parent.to_path_buf();
     path.push(name);
@@ -250,7 +299,17 @@ impl FilesystemMT for FS {
     Ok((0,0))
   }
 
+  fn open(&self, _req: RequestInfo, path: &Path, flags: u32) -> ResultOpen {
+    let node = match self.find_node(path) {
+      Some(node) => node,
+      None => return Err(ENOENT),
+    };
+    let handle = self.create_handle(Handle{node: node.0, _flags: flags,});
+    Ok((handle, flags))
+  }
+
   fn getattr(&self, _req: RequestInfo, path: &Path, _fh: Option<u64>) -> ResultEntry {
+    println!("getattr {:?}", path);
     let attrs = try!(self.with_entry(path, &(|entry| entry.attrs())));
     let time = time::get_time();
     Ok((time, attrs))
@@ -290,6 +349,7 @@ impl FilesystemMT for FS {
 
   fn create(&self, _req: RequestInfo, parent: &Path, name: &OsStr, mode: u32, _flags: u32) -> ResultCreate {
     let path = self.path_from_parts(parent, name);
+    println!("create {:?}", path);
     let mut entry = FSEntry::new(FileType::RegularFile);
     entry.perm = mode;
     let created_entry = CreatedEntry {
@@ -341,16 +401,16 @@ impl FilesystemMT for FS {
     }))
   }
 
-  fn write(&self, _req: RequestInfo, path: &Path, _fh: u64, offset: u64, data: Vec<u8>, _flags: u32) -> ResultWrite {
+  fn write(&self, _req: RequestInfo, _path: &Path, fh: u64, offset: u64, data: Vec<u8>, _flags: u32) -> ResultWrite {
     let len = data.len() as u32;
-    self.modify_entry(path, &(|entry| {
+    self.modify_handle(fh, &(|entry| {
       entry.write(offset, &data);
       len
     }))
   }
 
-  fn read(&self, _req: RequestInfo, path: &Path, _fh: u64, offset: u64, size: u32) -> ResultData {
-    self.with_entry(path, &(|entry| entry.read(offset, size)))
+  fn read(&self, _req: RequestInfo, _path: &Path, fh: u64, offset: u64, size: u32) -> ResultData {
+    self.with_handle(fh, &(|entry| entry.read(offset, size)))
   }
 
   fn readlink(&self, _req: RequestInfo, path: &Path) -> ResultData {
