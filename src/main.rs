@@ -295,14 +295,14 @@ impl FilesystemMT for FS {
     Ok(())
   }
 
-  fn opendir(&self, _req: RequestInfo, _path: &Path, _flags: u32) -> ResultOpen {
-    Ok((0,0))
-  }
-
   fn open(&self, _req: RequestInfo, path: &Path, flags: u32) -> ResultOpen {
     let node = try!(self.find_node(path));
     let handle = self.create_handle(Handle{node: node, _flags: flags,});
     Ok((handle, flags))
+  }
+
+  fn opendir(&self, req: RequestInfo, path: &Path, flags: u32) -> ResultOpen {
+    self.open(req, path, flags)
   }
 
   fn release(&self, _req: RequestInfo, _path: &Path, fh: u64, _flags: u32, _lock_owner: u64, _flush: bool) -> ResultEmpty {
@@ -316,8 +316,8 @@ impl FilesystemMT for FS {
     Ok((time, attrs))
   }
 
-  fn readdir(&self, _req: RequestInfo, path: &Path, _fh: u64) -> ResultReaddir {
-    let children = try!(self.with_path(path, &(|node| node.children())));
+  fn readdir(&self, _req: RequestInfo, _path: &Path, fh: u64) -> ResultReaddir {
+    let children = try!(self.with_handle(fh, &(|node| node.children())));
     Ok(children)
   }
 
