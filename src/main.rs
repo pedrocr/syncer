@@ -173,7 +173,7 @@ impl FS {
       let handles = self.handles.read().unwrap();
       match handles.get(&handle) {
         Some(h) => h.node,
-        None => return Err(libc::ENOENT),
+        None => return Err(libc::EBADF),
       }
     };
     self.with_node(node, closure)
@@ -214,7 +214,7 @@ impl FS {
       let handles = self.handles.read().unwrap();
       match handles.get(&handle) {
         Some(h) => h.node,
-        None => return Err(libc::ENOENT),
+        None => return Err(libc::EBADF),
       }
     };
     self.modify_node(node, closure)
