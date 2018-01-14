@@ -6,8 +6,8 @@ use fuse_mt::*;
 use std::path::{Path,PathBuf};
 use std::ffi::{OsStr, OsString};
 use std::os::unix::ffi::OsStrExt;
-use std::collections::BTreeMap;
-use std::sync::RwLock;
+use std::collections::{BTreeMap, HashMap};
+use std::sync::{RwLock, Mutex};
 use time::Timespec;
 use libc::{ENOENT,ENOTEMPTY, c_int};
 use std::cmp;
@@ -124,36 +124,47 @@ impl FSEntry {
 }
 
 struct FS {
-  entries: RwLock<BTreeMap<PathBuf, FSEntry>>,
+  entries: RwLock<BTreeMap<PathBuf,(u64,FileType)>>,
+  nodes: RwLock<HashMap<u64,FSEntry>>,
+  node_counter: Mutex<u64>,
 }
 
 impl FS {
   fn new() -> FS {
-    let mut entries = BTreeMap::new();
-    entries.insert(PathBuf::from("/"), FSEntry::new(FileType::Directory));
-    entries.insert(PathBuf::from("/foo"), FSEntry::new(FileType::Directory));
-    entries.insert(PathBuf::from("/foo/bar"), FSEntry::new(FileType::RegularFile));
-    entries.insert(PathBuf::from("/foo/baz"), FSEntry::new(FileType::RegularFile));
-    entries.insert(PathBuf::from("/foo2"), FSEntry::new(FileType::Directory));
-
     FS {
-      entries: RwLock::new(entries),
+      entries: RwLock::new(BTreeMap::new()),
+      nodes: RwLock::new(HashMap::new()),
+      node_counter: Mutex::new(0),
     }
   }
 
   fn with_entry<F,T>(&self, path: &Path, closure: &F) -> Result<T, c_int>
     where F : Fn(&FSEntry) -> T {
-    let entries = self.entries.read().unwrap();
-    match entries.get(&(path.to_path_buf())) {
+    let node = {
+      let entries = self.entries.read().unwrap();
+      match entries.get(&(path.to_path_buf())) {
+        Some(e) => e.0,
+        None => return Err(ENOENT),
+      }
+    };
+    let nodes = self.nodes.read().unwrap();
+    match nodes.get(&node) {
       Some(e) => Ok(closure(e)),
-      None => Err(ENOENT),
+      None => return Err(ENOENT),
     }
   }
 
   fn modify_entry<F,T>(&self, path: &Path, closure: &F) -> Result<T, c_int>
     where F : Fn(&mut FSEntry) -> T {
-    let mut entries = self.entries.write().unwrap();
-    Ok(match entries.get_mut(path) {
+    let node = {
+      let entries = self.entries.read().unwrap();
+      match entries.get(&(path.to_path_buf())) {
+        Some(e) => e.0,
+        None => return Err(ENOENT),
+      }
+    };
+    let mut nodes = self.nodes.write().unwrap();
+    Ok(match nodes.get_mut(&node) {
       Some(mut entry) => closure(&mut entry),
       None => return Err(ENOENT),
     })
@@ -176,20 +187,38 @@ impl FS {
       // We're past the dir itself
       if !child.0.starts_with(path) { break }
 
-      children.push((child.0.clone(), child.1.filetype));
+      children.push((child.0.clone(), (child.1).1));
     }
 
     children
   }
 
-  fn remove_entry(&self, path: &Path) -> Option<FSEntry> {
+  fn remove_entry(&self, path: &Path) -> Option<(u64,FileType)> {
     let mut entries = self.entries.write().unwrap();
     entries.remove(path)
   }
 
-  fn insert_entry(&self, path: PathBuf, entry: FSEntry) {
+  fn link_entry(&self, path: PathBuf, node: (u64, FileType)) {
     let mut entries = self.entries.write().unwrap();
-    entries.insert(path, entry);
+    entries.insert(path, node);
+  }
+
+  fn insert_entry(&self, path: PathBuf, entry: FSEntry) {
+    let filetype = entry.filetype;
+    let node = self.create_node(entry);
+    let mut entries = self.entries.write().unwrap();
+    entries.insert(path, (node, filetype));
+  }
+
+  fn create_node(&self, entry: FSEntry) -> u64 {
+    let node = {
+      let mut counter = self.node_counter.lock().unwrap();
+      *counter += 1;
+      *counter
+    };
+    let mut nodes = self.nodes.write().unwrap();
+    nodes.insert(node, entry);
+    node
   }
 
   fn path_from_parts(&self, parent: &Path, name: &OsStr) -> PathBuf {
@@ -324,7 +353,7 @@ impl FilesystemMT for FS {
     let path = self.path_from_parts(parent, name);
     let newpath = self.path_from_parts(newparent, newname);
     match self.remove_entry(&path) {
-      Some(entry) => self.insert_entry(newpath, entry),
+      Some(node) => self.link_entry(newpath, node),
       None => return Err(ENOENT),
     };
     Ok(())
@@ -333,6 +362,12 @@ impl FilesystemMT for FS {
 
 fn main() {
   let fs = FS::new();
+  fs.insert_entry(PathBuf::from("/"), FSEntry::new(FileType::Directory));
+  fs.insert_entry(PathBuf::from("/foo"), FSEntry::new(FileType::Directory));
+  fs.insert_entry(PathBuf::from("/foo/bar"), FSEntry::new(FileType::RegularFile));
+  fs.insert_entry(PathBuf::from("/foo/baz"), FSEntry::new(FileType::RegularFile));
+  fs.insert_entry(PathBuf::from("/foo2"), FSEntry::new(FileType::Directory));
+
   let fs_mt = FuseMT::new(fs, 16);
   let path = "mnt".to_string();
   let options = [OsStr::new("-o"), OsStr::new("auto_unmount")];
