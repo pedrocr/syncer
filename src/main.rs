@@ -147,6 +147,11 @@ impl FS {
         None => return Err(ENOENT),
       }
     };
+    self.with_node(node, closure)
+  }
+
+  fn with_node<F,T>(&self, node: u64, closure: &F) -> Result<T, c_int>
+    where F : Fn(&FSEntry) -> T {
     let nodes = self.nodes.read().unwrap();
     match nodes.get(&node) {
       Some(e) => Ok(closure(e)),
@@ -196,6 +201,14 @@ impl FS {
   fn remove_entry(&self, path: &Path) -> Option<(u64,FileType)> {
     let mut entries = self.entries.write().unwrap();
     entries.remove(path)
+  }
+
+  fn find_node(&self, path: &Path) -> Option<(u64,FileType)> {
+    let entries = self.entries.read().unwrap();
+    match entries.get(path) {
+      Some(&e) => Some(e),
+      None => None,
+    }
   }
 
   fn link_entry(&self, path: PathBuf, node: (u64, FileType)) {
@@ -310,6 +323,16 @@ impl FilesystemMT for FS {
     let created_symlink = (entry.ctime, entry.attrs());
     self.insert_entry(path, entry);
     Ok(created_symlink)
+  }
+
+  fn link(&self, _req: RequestInfo, path: &Path, newparent: &Path, newname: &OsStr) -> ResultEntry {
+    let newpath = self.path_from_parts(newparent, newname);
+    let node = match self.find_node(&path) {
+      Some(node) => node,
+      None => return Err(ENOENT),
+    };
+    self.link_entry(newpath, node);
+    self.with_node(node.0, &(|entry| (entry.ctime, entry.attrs())))
   }
 
   fn truncate(&self, _req: RequestInfo, path: &Path, _fh: Option<u64>, size: u64) -> ResultEmpty {
