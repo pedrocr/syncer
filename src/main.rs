@@ -299,6 +299,11 @@ impl FS {
     count
   }
 
+  fn delete_handle(&self, handle: u64) {
+    let mut handles = self.handles.write().unwrap();
+    handles.remove(&handle);
+  }
+
   fn path_from_parts(&self, parent: &Path, name: &OsStr) -> PathBuf {
     let mut path = parent.to_path_buf();
     path.push(name);
@@ -322,6 +327,11 @@ impl FilesystemMT for FS {
     };
     let handle = self.create_handle(Handle{node: node.0, _flags: flags,});
     Ok((handle, flags))
+  }
+
+  fn release(&self, _req: RequestInfo, _path: &Path, fh: u64, _flags: u32, _lock_owner: u64, _flush: bool) -> ResultEmpty {
+    self.delete_handle(fh);
+    Ok(())
   }
 
   fn getattr(&self, _req: RequestInfo, path: &Path, fh: Option<u64>) -> ResultEntry {
