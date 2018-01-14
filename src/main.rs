@@ -12,15 +12,17 @@ use time::Timespec;
 use libc::c_int;
 use std::cmp;
 
+const BLKSIZE: usize = 4096;
+
 #[derive(Clone)]
 struct FSBlock {
-  data: [u8; 4096],
+  data: [u8; BLKSIZE],
 }
 
 impl FSBlock {
   fn new() -> FSBlock {
     FSBlock {
-      data: [0; 4096],
+      data: [0; BLKSIZE],
     }
   }
 }
@@ -107,7 +109,7 @@ impl FSEntry {
 
   fn write(&mut self, offset: u64, data: &[u8]) {
     self.size = cmp::max(self.size, offset + data.len() as u64);
-    let total_needed_blocks = ((self.size + 4096 - 1) / 4096) as usize;
+    let total_needed_blocks = (self.size as usize + BLKSIZE - 1) / BLKSIZE;
     if total_needed_blocks > self.blocks.len() {
       self.blocks.resize(total_needed_blocks, FSBlock::new());
     }
@@ -115,14 +117,14 @@ impl FSEntry {
     let start = offset as usize;
     let end = start + data.len();
     let mut written = 0;
-    let startblock = start/4096;
-    let endblock = (end + 4096 - 1)/4096;
+    let startblock = start/BLKSIZE;
+    let endblock = (end + BLKSIZE - 1)/BLKSIZE;
     for (i,block) in self.blocks[startblock..endblock].iter_mut().enumerate() {
       let i = i+startblock;
-      let bstart = cmp::max(start, i*4096);
-      let bend = cmp::min(end, (i+1)*4096);
+      let bstart = cmp::max(start, i*BLKSIZE);
+      let bend = cmp::min(end, (i+1)*BLKSIZE);
       let bsize = bend - bstart;
-      let boffset = bstart - i*4096;
+      let boffset = bstart - i*BLKSIZE;
       block.data[boffset..boffset+bsize].copy_from_slice(&data[written..written+bsize]);
       written += bsize;
     }
@@ -134,14 +136,14 @@ impl FSEntry {
     let end = cmp::min(start + (size as usize), self.size as usize);
     let mut data = vec![0; end - start];
     let mut written = 0;
-    let startblock = start/4096;
-    let endblock = (end + 4096 - 1)/4096;
+    let startblock = start/BLKSIZE;
+    let endblock = (end + BLKSIZE - 1)/BLKSIZE;
     for i in startblock..endblock {
       let block = &self.blocks[i];
-      let bstart = cmp::max(start, i*4096);
-      let bend = cmp::min(end, (i+1)*4096);
+      let bstart = cmp::max(start, i*BLKSIZE);
+      let bend = cmp::min(end, (i+1)*BLKSIZE);
       let bsize = bend - bstart;
-      let boffset = bstart - i*4096;
+      let boffset = bstart - i*BLKSIZE;
       data[written..written+bsize].copy_from_slice(&block.data[boffset..boffset+bsize]);
       written += bsize;
     }
@@ -371,7 +373,7 @@ impl FilesystemMT for FS {
     let node = try!(self.find_node(parent));
     let mut entry = FSEntry::new(FileType::Symlink);
     let data = target.as_os_str().as_bytes();
-    let mut blockdata = [0; 4096];
+    let mut blockdata = [0; BLKSIZE];
     blockdata[0..data.len()].copy_from_slice(data);
     entry.blocks = vec![FSBlock{data: blockdata}];
     entry.perm = 0o777;
