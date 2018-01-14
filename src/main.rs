@@ -25,7 +25,6 @@ impl FSBlock {
   }
 }
 
-#[derive(Clone)]
 struct FSEntry {
   filetype: FileType,
   perm: u32,
@@ -78,6 +77,50 @@ impl FSEntry {
       flags: self.flags,      
     }
   }
+
+  fn write(&mut self, offset: u64, data: &[u8]) {
+    self.size = cmp::max(self.size, offset + data.len() as u64);
+    let total_needed_blocks = ((self.size + 4096 - 1) / 4096) as usize;
+    if total_needed_blocks > self.blocks.len() {
+      self.blocks.resize(total_needed_blocks, FSBlock::new());
+    }
+
+    let start = offset as usize;
+    let end = start + data.len();
+    let mut written = 0;
+    let startblock = start/4096;
+    let endblock = (end + 4096 - 1)/4096;
+    for (i,block) in self.blocks[startblock..endblock].iter_mut().enumerate() {
+      let i = i+startblock;
+      let bstart = cmp::max(start, i*4096);
+      let bend = cmp::min(end, (i+1)*4096);
+      let bsize = bend - bstart;
+      let boffset = bstart - i*4096;
+      block.data[boffset..boffset+bsize].copy_from_slice(&data[written..written+bsize]);
+      written += bsize;
+    }
+    assert!(written == data.len());
+  }
+
+  fn read(&self, offset: u64, size: u32) -> Vec<u8> {
+    let start = offset as usize;
+    let end = cmp::min(start + (size as usize), self.size as usize);
+    let mut data = vec![0; end - start];
+    let mut written = 0;
+    let startblock = start/4096;
+    let endblock = (end + 4096 - 1)/4096;
+    for i in startblock..endblock {
+      let block = &self.blocks[i];
+      let bstart = cmp::max(start, i*4096);
+      let bend = cmp::min(end, (i+1)*4096 - 1);
+      let bsize = bend - bstart;
+      let boffset = bstart - i*4096;
+      data[written..written+bsize].copy_from_slice(&block.data[boffset..boffset+bsize]);
+      written += bsize;
+    }
+    assert!(written == data.len());
+    data
+  }
 }
 
 struct FS {
@@ -98,15 +141,25 @@ impl FS {
     }
   }
 
-  fn get_entry(&self, path: &Path) -> Result<FSEntry, c_int> {
+  fn with_entry<F,T>(&self, path: &Path, closure: &F) -> Result<T, c_int>
+    where F : Fn(&FSEntry) -> T {
     let entries = self.entries.read().unwrap();
     match entries.get(&(path.to_path_buf())) {
-      Some(e) => Ok(e.clone()),
+      Some(e) => Ok(closure(e)),
       None => Err(ENOENT),
     }
   }
 
-  fn get_children(&self, path: &Path) -> Vec<(PathBuf, FSEntry)> {
+  fn modify_entry<F,T>(&self, path: &Path, closure: &F) -> Result<T, c_int>
+    where F : Fn(&mut FSEntry) -> T {
+    let mut entries = self.entries.write().unwrap();
+    Ok(match entries.get_mut(path) {
+      Some(mut entry) => closure(&mut entry),
+      None => return Err(ENOENT),
+    })
+  }
+
+  fn get_children(&self, path: &Path) -> Vec<(PathBuf, FileType)> {
     // List all the children of a given path by iterating the BTreeMap
     // This isn't particularly efficient for directories with a lot of children
     // directories because the sorting order results in a depth first search. Fixing
@@ -123,23 +176,15 @@ impl FS {
       // We're past the dir itself
       if !child.0.starts_with(path) { break }
 
-      children.push((child.0.clone(), child.1.clone()));
+      children.push((child.0.clone(), child.1.filetype));
     }
 
     children
   }
 
-  fn modify_entry<F>(&self, path: &Path, closure: &F) -> ResultEmpty
-    where F : Fn(&mut FSEntry) {
-    let mut entry = try!(self.get_entry(path));
-    closure(&mut entry);
-    self.insert_entry(path.to_path_buf(), entry);
-    Ok(())
-  }
-
-  fn remove_entry(&self, path: &Path) {
+  fn remove_entry(&self, path: &Path) -> Option<FSEntry> {
     let mut entries = self.entries.write().unwrap();
-    entries.remove(path);
+    entries.remove(path)
   }
 
   fn insert_entry(&self, path: PathBuf, entry: FSEntry) {
@@ -164,9 +209,9 @@ impl FilesystemMT for FS {
   }
 
   fn getattr(&self, _req: RequestInfo, path: &Path, _fh: Option<u64>) -> ResultEntry {
-    let entry = try!(self.get_entry(path));
+    let attrs = try!(self.with_entry(path, &(|entry| entry.attrs())));
     let time = time::get_time();
-    Ok((time, entry.attrs()))
+    Ok((time, attrs))
   }
 
   fn readdir(&self, _req: RequestInfo, path: &Path, _fh: u64) -> ResultReaddir {
@@ -175,7 +220,7 @@ impl FilesystemMT for FS {
     dirlist.push(DirectoryEntry{name: OsString::from(".."), kind: FileType::Directory});
     for child in self.get_children(path) {
       let name = OsString::from(child.0.file_name().unwrap());
-      let kind = child.1.filetype;
+      let kind = child.1;
       dirlist.push(DirectoryEntry{name, kind,});    
     }
     Ok(dirlist)
@@ -245,59 +290,19 @@ impl FilesystemMT for FS {
   }
 
   fn write(&self, _req: RequestInfo, path: &Path, _fh: u64, offset: u64, data: Vec<u8>, _flags: u32) -> ResultWrite {
-    try!(self.get_entry(path)); // Make sure it exists and return ENOENT if not
-    let mut entries = self.entries.write().unwrap();
-    let entry = entries.entry(path.to_path_buf()).or_insert(FSEntry::new(FileType::RegularFile));
-
     let len = data.len() as u32;
-    entry.size = cmp::max(entry.size, offset + data.len() as u64);
-    let total_needed_blocks = ((entry.size + 4096 - 1) / 4096) as usize;
-    if total_needed_blocks > entry.blocks.len() {
-      entry.blocks.resize(total_needed_blocks, FSBlock::new());
-    }
-
-    let start = offset as usize;
-    let end = start + data.len();
-    let mut written = 0;
-    let startblock = start/4096;
-    let endblock = (end + 4096 - 1)/4096;
-    for (i,block) in entry.blocks[startblock..endblock].iter_mut().enumerate() {
-      let i = i+startblock;
-      let bstart = cmp::max(start, i*4096);
-      let bend = cmp::min(end, (i+1)*4096);
-      let bsize = bend - bstart;
-      let boffset = bstart - i*4096;
-      block.data[boffset..boffset+bsize].copy_from_slice(&data[written..written+bsize]);
-      written += bsize;
-    }
-    assert!(written == data.len());
-    Ok(len)
+    self.modify_entry(path, &(|entry| {
+      entry.write(offset, &data);
+      len
+    }))
   }
 
   fn read(&self, _req: RequestInfo, path: &Path, _fh: u64, offset: u64, size: u32) -> ResultData {
-    let entry = try!(self.get_entry(path));
-    let start = offset as usize;
-    let end = cmp::min(start + (size as usize), entry.size as usize);
-    let mut data = vec![0; end - start];
-    let mut written = 0;
-    let startblock = start/4096;
-    let endblock = (end + 4096 - 1)/4096;
-    for i in startblock..endblock {
-      let block = &entry.blocks[i];
-      let bstart = cmp::max(start, i*4096);
-      let bend = cmp::min(end, (i+1)*4096 - 1);
-      let bsize = bend - bstart;
-      let boffset = bstart - i*4096;
-      data[written..written+bsize].copy_from_slice(&block.data[boffset..boffset+bsize]);
-      written += bsize;
-    }
-    assert!(written == data.len());
-    Ok(data)
+    self.with_entry(path, &(|entry| entry.read(offset, size)))
   }
 
   fn readlink(&self, _req: RequestInfo, path: &Path) -> ResultData {
-    let entry = try!(self.get_entry(path));
-    Ok(entry.blocks[0].data[0..entry.size as usize].to_vec())
+    self.with_entry(path, &(|entry| entry.blocks[0].data[0..entry.size as usize].to_vec()))
   }
 
   fn rmdir(&self, _req: RequestInfo, parent: &Path, name: &OsStr) -> ResultEmpty {
@@ -318,9 +323,10 @@ impl FilesystemMT for FS {
   fn rename(&self, _red: RequestInfo, parent: &Path, name: &OsStr, newparent: &Path, newname: &OsStr) -> ResultEmpty {
     let path = self.path_from_parts(parent, name);
     let newpath = self.path_from_parts(newparent, newname);
-    let entry = try!(self.get_entry(&path));
-    self.remove_entry(&path);
-    self.insert_entry(newpath, entry);
+    match self.remove_entry(&path) {
+      Some(entry) => self.insert_entry(newpath, entry),
+      None => return Err(ENOENT),
+    };
     Ok(())
   }
 }
