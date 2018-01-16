@@ -74,7 +74,7 @@ impl FSEntry {
       crtime: self.ctime,
       kind: self.filetype,
       perm: self.perm as u16,
-      nlink: 0,
+      nlink: 1,
       uid: self.uid,
       gid: self.gid,
       rdev: self.rdev,
@@ -382,6 +382,16 @@ impl FilesystemMT for FS {
     let newnode = self.create_node(entry);
     try!(self.modify_node(node, &(|parent| parent.add_child(name, (newnode, FileType::Symlink)))));
     Ok(created_symlink)
+  }
+
+  fn link(&self, _req: RequestInfo, path: &Path, newparent: &Path, newname: &OsStr) -> ResultEntry {
+    let childnode = try!(self.find_node(path));
+    let dirnode = try!(self.find_node(newparent));
+    let childnodeinfo = try!(self.with_node(childnode, &(|entry| {
+      ((entry.ctime, entry.attrs()), entry.filetype)
+    })));
+    try!(self.modify_node(dirnode, &(|parent| parent.add_child(newname, (childnode, childnodeinfo.1)))));
+    Ok(childnodeinfo.0)
   }
 
   fn truncate(&self, _req: RequestInfo, path: &Path, fh: Option<u64>, size: u64) -> ResultEmpty {
