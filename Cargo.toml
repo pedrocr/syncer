@@ -7,3 +7,4 @@ authors = ["Pedro Côrte-Real <pedro@pedrocr.net>"]
 time = "0.1.39"
 fuse_mt = "0.4.3"
 libc = "0.2"
+users = "0.6.0"

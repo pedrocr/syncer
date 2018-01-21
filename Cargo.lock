@@ -73,6 +73,7 @@ dependencies = [
  "fuse_mt 0.4.3 (registry+https://github.com/rust-lang/crates.io-index)",
  "libc 0.2.35 (registry+https://github.com/rust-lang/crates.io-index)",
  "time 0.1.39 (registry+https://github.com/rust-lang/crates.io-index)",
+ "users 0.6.0 (registry+https://github.com/rust-lang/crates.io-index)",
 ]
 
 [[package]]
@@ -96,6 +97,14 @@ dependencies = [
  "libc 0.2.35 (registry+https://github.com/rust-lang/crates.io-index)",
  "redox_syscall 0.1.37 (registry+https://github.com/rust-lang/crates.io-index)",
  "winapi 0.3.3 (registry+https://github.com/rust-lang/crates.io-index)",
+]
+
+[[package]]
+name = "users"
+version = "0.6.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+dependencies = [
+ "libc 0.2.35 (registry+https://github.com/rust-lang/crates.io-index)",
 ]
 
 [[package]]
@@ -130,6 +139,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 "checksum thread-scoped 1.0.2 (registry+https://github.com/rust-lang/crates.io-index)" = "bcbb6aa301e5d3b0b5ef639c9a9c7e2f1c944f177b460c04dc24c69b1fa2bd99"
 "checksum threadpool 1.7.1 (registry+https://github.com/rust-lang/crates.io-index)" = "e2f0c90a5f3459330ac8bc0d2f879c693bb7a2f59689c1083fc4ef83834da865"
 "checksum time 0.1.39 (registry+https://github.com/rust-lang/crates.io-index)" = "a15375f1df02096fb3317256ce2cee6a1f42fc84ea5ad5fc8c421cfe40c73098"
+"checksum users 0.6.0 (registry+https://github.com/rust-lang/crates.io-index)" = "99ab1b53affc9f75f57da4a8b051a188e84d20d43bea0dd9bd8db71eebbca6da"
 "checksum winapi 0.3.3 (registry+https://github.com/rust-lang/crates.io-index)" = "b09fb3b6f248ea4cd42c9a65113a847d612e17505d6ebd1f7357ad68a8bf8693"
 "checksum winapi-i686-pc-windows-gnu 0.3.2 (registry+https://github.com/rust-lang/crates.io-index)" = "ec6667f60c23eca65c561e63a13d81b44234c2e38a6b6c959025ee907ec614cc"
 "checksum winapi-x86_64-pc-windows-gnu 0.3.2 (registry+https://github.com/rust-lang/crates.io-index)" = "98f12c52b2630cd05d2c3ffd8e008f7f48252c042b4871c72aed9dc733b96668"

@@ -1,6 +1,7 @@
 extern crate time;
 extern crate fuse_mt;
 extern crate libc;
+extern crate users;
 
 use fuse_mt::*;
 use std::path::Path;
@@ -167,8 +168,12 @@ struct FS {
 impl FS {
   fn new() -> FS {
     let mut nodes = HashMap::new();
+    let mut root = FSEntry::new(FileType::Directory);
+    root.perm = 0o755;
+    root.uid = users::get_current_uid();
+    root.gid = users::get_current_gid();
     // Root node is always 0
-    nodes.insert(0, FSEntry::new(FileType::Directory));
+    nodes.insert(0, root);
     FS {
       nodes: RwLock::new(nodes),
       node_counter: Mutex::new(0),
@@ -345,8 +350,13 @@ impl FilesystemMT for FS {
 
   fn create(&self, _req: RequestInfo, parent: &Path, name: &OsStr, mode: u32, flags: u32) -> ResultCreate {
     let node = try!(self.find_node(parent));
-    let mut entry = FSEntry::new(FileType::RegularFile);
-    entry.perm = mode;
+    let entry = try!(self.with_node(node, &(|parent| {
+      let mut e = FSEntry::new(FileType::RegularFile);
+      e.perm = mode;
+      e.gid = parent.gid;
+      e.uid = parent.uid;
+      e
+    })));
     let mut created_entry = CreatedEntry {
       ttl: entry.ctime,
       attr: entry.attrs(),
@@ -361,23 +371,33 @@ impl FilesystemMT for FS {
 
   fn mkdir(&self, _req: RequestInfo, parent: &Path, name: &OsStr, mode: u32) -> ResultEntry {
     let node = try!(self.find_node(parent));
-    let mut entry = FSEntry::new(FileType::Directory);
-    entry.perm = mode;
+    let entry = try!(self.with_node(node, &(|parent| {
+      let mut e = FSEntry::new(FileType::Directory);
+      e.perm = mode;
+      e.gid = parent.gid;
+      e.uid = parent.uid;
+      e
+    })));
     let created_dir = (entry.ctime, entry.attrs());
     let newnode = self.create_node(entry);
-    try!(self.modify_node(node, &(|parent| parent.add_child(name, (newnode, FileType::RegularFile)))));
+    try!(self.modify_node(node, &(|parent| parent.add_child(name, (newnode, FileType::Directory)))));
     Ok(created_dir)
   }
 
   fn symlink(&self, _req: RequestInfo, parent: &Path, name: &OsStr, target: &Path) -> ResultEntry {
     let node = try!(self.find_node(parent));
-    let mut entry = FSEntry::new(FileType::Symlink);
     let data = target.as_os_str().as_bytes();
     let mut blockdata = [0; BLKSIZE];
     blockdata[0..data.len()].copy_from_slice(data);
-    entry.blocks = vec![FSBlock{data: blockdata}];
-    entry.perm = 0o777;
-    entry.size = data.len() as u64;
+    let entry = try!(self.with_node(node, &(|parent| {
+      let mut e = FSEntry::new(FileType::Symlink);
+      e.blocks = vec![FSBlock{data: blockdata}];
+      e.perm = 0o777;
+      e.size = data.len() as u64;
+      e.gid = parent.gid;
+      e.uid = parent.uid;
+      e
+    })));
     let created_symlink = (entry.ctime, entry.attrs());
     let newnode = self.create_node(entry);
     try!(self.modify_node(node, &(|parent| parent.add_child(name, (newnode, FileType::Symlink)))));
@@ -446,7 +466,7 @@ fn main() {
   let fs = FS::new();
   let fs_mt = FuseMT::new(fs, 16);
   let path = "mnt".to_string();
-  let options = [OsStr::new("-o"), OsStr::new("auto_unmount")];
+  let options = [OsStr::new("-o"), OsStr::new("auto_unmount,default_permissions")];
   println!("Starting filesystem in {:?}", path);
   match fuse_mt::mount(fs_mt, &path, &options[..]) {
     Ok(_) => {},

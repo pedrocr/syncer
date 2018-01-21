@@ -3,5 +3,4 @@ Just your standard bugs:
 
 To do to get the basic POSIX ramfs working:
   - Implement statfs
-  - Implement proper access control
   - Maybe consider extended attributes but probably not device files?
