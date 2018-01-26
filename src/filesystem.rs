@@ -15,6 +15,8 @@ use self::fuse_mt::*;
 use super::blockstorage::*;
 use std::io::Error;
 
+pub const BLKSIZE: usize = 4096;
+
 pub fn run(path: &str) -> Result<(), Error> {
   let fs = FS::new();
   let fs_mt = FuseMT::new(fs, 16);
@@ -33,7 +35,7 @@ struct FSEntry {
   mtime: Timespec,
   ctime: Timespec,
   size: u64,
-  blocks: Vec<FSBlock>,
+  blocks: Vec<BlockHash>,
   children: HashMap<OsString, (u64, FileType)>,
 }
 
@@ -102,11 +104,11 @@ impl FSEntry {
     }
   }
 
-  fn write(&mut self, offset: u64, data: &[u8]) {
+  fn write(&mut self, bs: &BlobStorage, offset: u64, data: &[u8]) {
     self.size = cmp::max(self.size, offset + data.len() as u64);
     let total_needed_blocks = (self.size as usize + BLKSIZE - 1) / BLKSIZE;
     if total_needed_blocks > self.blocks.len() {
-      self.blocks.resize(total_needed_blocks, FSBlock::new());
+      self.blocks.resize(total_needed_blocks, BlobStorage::zero(BLKSIZE));
     }
 
     let start = offset as usize;
@@ -120,29 +122,22 @@ impl FSEntry {
       let bend = cmp::min(end, (i+1)*BLKSIZE);
       let bsize = bend - bstart;
       let boffset = bstart - i*BLKSIZE;
-      block.data[boffset..boffset+bsize].copy_from_slice(&data[written..written+bsize]);
+      let newblock = bs.write(block, boffset, &data[written..written+bsize]);
+      block.copy_from_slice(&newblock);
       written += bsize;
     }
     assert!(written == data.len());
   }
 
-  fn read(&self, offset: u64, size: u32) -> Vec<u8> {
-    let start = offset as usize;
-    let end = cmp::min(start + (size as usize), self.size as usize);
-    let mut data = vec![0; end - start];
-    let mut written = 0;
-    let startblock = start/BLKSIZE;
-    let endblock = (end + BLKSIZE - 1)/BLKSIZE;
-    for i in startblock..endblock {
-      let block = &self.blocks[i];
-      let bstart = cmp::max(start, i*BLKSIZE);
-      let bend = cmp::min(end, (i+1)*BLKSIZE);
-      let bsize = bend - bstart;
-      let boffset = bstart - i*BLKSIZE;
-      data[written..written+bsize].copy_from_slice(&block.data[boffset..boffset+bsize]);
-      written += bsize;
+  fn read(&self, bs: &BlobStorage, offset: u64, size: u32) -> Vec<u8> {
+    if offset >= self.size {
+      // We're asking for an out of bounds offset
+      return Vec::new()
     }
-    assert!(written == data.len());
+    let bsize = (cmp::min(offset+(size as u64), self.size) - offset) as usize;
+    let bnum = (offset as usize)/BLKSIZE;
+    let boffset = (offset as usize) - bnum*BLKSIZE;
+    let data = bs.read(&self.blocks[bnum], boffset, bsize);
     data
   }
 }
@@ -153,6 +148,7 @@ struct Handle {
 }
 
 pub struct FS {
+  block_storage: BlobStorage,
   nodes: RwLock<HashMap<u64,FSEntry>>,
   node_counter: Mutex<u64>,
   handles: RwLock<HashMap<u64,Handle>>,
@@ -168,7 +164,11 @@ impl FS {
     root.gid = users::get_current_gid();
     // Root node is always 0
     nodes.insert(0, root);
+    let bs = BlobStorage::new();
+    let empty_block = [0 as u8; BLKSIZE];
+    bs.add_block(&empty_block);
     FS {
+      block_storage: bs,
       nodes: RwLock::new(nodes),
       node_counter: Mutex::new(0),
       handles: RwLock::new(HashMap::new()),
@@ -385,7 +385,7 @@ impl FilesystemMT for FS {
     blockdata[0..data.len()].copy_from_slice(data);
     let entry = try!(self.with_node(node, &(|parent| {
       let mut e = FSEntry::new(FileType::Symlink);
-      e.blocks = vec![FSBlock{data: blockdata}];
+      e.blocks = vec![self.block_storage.add_block(&blockdata)];
       e.perm = 0o777;
       e.size = data.len() as u64;
       e.gid = parent.gid;
@@ -417,17 +417,17 @@ impl FilesystemMT for FS {
   fn write(&self, _req: RequestInfo, _path: &Path, fh: u64, offset: u64, data: Vec<u8>, _flags: u32) -> ResultWrite {
     let len = data.len() as u32;
     self.modify_handle(fh, &(|entry| {
-      entry.write(offset, &data);
+      entry.write(&self.block_storage, offset, &data);
       len
     }))
   }
 
   fn read(&self, _req: RequestInfo, _path: &Path, fh: u64, offset: u64, size: u32) -> ResultData {
-    self.with_handle(fh, &(|entry| entry.read(offset, size)))
+    self.with_handle(fh, &(|entry| entry.read(&self.block_storage, offset, size)))
   }
 
   fn readlink(&self, _req: RequestInfo, path: &Path) -> ResultData {
-    self.with_path(path, &(|entry| entry.blocks[0].data[0..entry.size as usize].to_vec()))
+    self.with_path(path, &(|entry| entry.read(&self.block_storage, 0, BLKSIZE as u32)))
   }
 
   fn rmdir(&self, _req: RequestInfo, parent: &Path, name: &OsStr) -> ResultEmpty {
