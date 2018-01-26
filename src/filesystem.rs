@@ -134,10 +134,23 @@ impl FSEntry {
       // We're asking for an out of bounds offset
       return Vec::new()
     }
-    let bsize = (cmp::min(offset+(size as u64), self.size) - offset) as usize;
-    let bnum = (offset as usize)/BLKSIZE;
-    let boffset = (offset as usize) - bnum*BLKSIZE;
-    let data = bs.read(&self.blocks[bnum], boffset, bsize);
+
+    let start = offset as usize;
+    let end = cmp::min(start + (size as usize), self.size as usize);
+    let mut data = vec![0; end - start];
+    let mut written = 0;
+    let startblock = start/BLKSIZE;
+    let endblock = (end + BLKSIZE - 1)/BLKSIZE;
+    for i in startblock..endblock {
+      let block = &self.blocks[i];
+      let bstart = cmp::max(start, i*BLKSIZE);
+      let bend = cmp::min(end, (i+1)*BLKSIZE);
+      let bsize = bend - bstart;
+      let boffset = bstart - i*BLKSIZE;
+      data[written..written+bsize].copy_from_slice(&bs.read(block, boffset, bsize));
+      written += bsize;
+    }
+    assert!(written == data.len());
     data
   }
 }
