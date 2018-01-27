@@ -1,5 +1,3 @@
-use std::collections::HashMap;
-use std::sync::RwLock;
 use std::cmp;
 extern crate blake2;
 use self::blake2::Blake2b;
@@ -7,6 +5,9 @@ use self::blake2::digest::{Input, VariableOutput};
 extern crate hex;
 extern crate libc;
 use self::libc::c_int;
+use std::path::PathBuf;
+use std::fs;
+use std::io::prelude::*;
 
 const HASHSIZE: usize = 20;
 pub type BlobHash = [u8;HASHSIZE];
@@ -30,14 +31,62 @@ impl Blob {
     }
   }
 
-  pub fn read(&self, offset: usize, bytes: usize) -> Vec<u8> {
+  fn get_path(path: &PathBuf, hash: &BlobHash) -> PathBuf {
+    let mut path = path.clone();
+    // Three levels of fanout should allow >20TB easily
+    path.push(format!("{:x}", hash[0]));
+    path.push(format!("{:x}", hash[1]));
+    path.push(format!("{:x}", hash[2]));
+    path.push(hex::encode(hash));
+    path
+  }
+
+  fn load(path: &PathBuf, hash: &BlobHash) -> Result<Self, c_int> {
+    let path = Self::get_path(path, hash);
+    if !path.exists() {
+      Err(libc::EIO)
+    } else {
+      let mut file = match fs::File::open(&path) {
+        Ok(f) => f,
+        Err(_) => return Err(libc::EIO),
+      };
+      let mut buffer = Vec::new();
+      match file.read_to_end(&mut buffer) {
+        Ok(_) => {},
+        Err(_) => return Err(libc::EIO),
+      }
+      Ok(Self::new_with_data(buffer))
+    }
+  }
+
+  fn store(&self, path: &PathBuf) -> Result<(), c_int> {
+    let path = Self::get_path(path, &self.hash);
+    if !path.exists() {
+      let dir = path.parent().unwrap();
+      match fs::create_dir_all(&dir) {
+        Ok(_) => {},
+        Err(_) => return Err(libc::EIO),
+      }
+      let mut file = match fs::File::create(&path) {
+        Ok(f) => f,
+        Err(_) => return Err(libc::EIO),
+      };
+      match file.write_all(&self.data) {
+        Ok(_) => {},
+        Err(_) => return Err(libc::EIO),
+      }
+    }
+    Ok(())
+  }
+
+  fn read(&self, offset: usize, bytes: usize) -> Vec<u8> {
     assert!(offset < self.data.len());
     let start = offset;
     let end = cmp::min(offset+bytes, self.data.len());
     self.data[start..end].to_vec()
   }
 
-  pub fn write(&self, offset: usize, data: &[u8]) -> Blob {
+  fn write(&self, offset: usize, data: &[u8]) -> Blob {
     let start = offset;
     let end = cmp::min(offset+data.len(), self.data.len());
     let bytes = end - start;
@@ -56,15 +105,13 @@ impl Blob {
 }
 
 pub struct BlobStorage {
-  source: String,
-  blobs: RwLock<HashMap<BlobHash, Blob>>,
+  source: PathBuf,
 }
 
 impl BlobStorage {
   pub fn new(source: &str) -> Self {
     BlobStorage {
-      source: source.to_string(),
-      blobs: RwLock::new(HashMap::new()),
+      source: PathBuf::from(source),
     }
   }
 
@@ -82,17 +129,11 @@ impl BlobStorage {
   }
 
   fn get_blob(&self, hash: &BlobHash) -> Result<Blob, c_int> {
-    let blobs = self.blobs.read().unwrap();
-    match blobs.get(hash) {
-      Some(blob) => Ok(blob.clone()),
-      None => Err(libc::EIO),
-    }
+    Blob::load(&self.source, hash)
   }
 
   fn store_blob(&self, blob: Blob) -> Result<(), c_int> {
-    let mut blobs = self.blobs.write().unwrap();
-    blobs.insert(blob.hash, blob);
-    Ok(())
+    blob.store(&self.source)
   }
 
   pub fn zero(size: usize) -> BlobHash {
