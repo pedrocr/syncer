@@ -13,7 +13,7 @@ use self::libc::c_int;
 use std::cmp;
 use self::fuse_mt::*;
 use super::blobstorage::*;
-use std::io::Error;
+use std::io::{Error, ErrorKind};
 
 const BLKSIZE: usize = 4096;
 
@@ -21,11 +21,14 @@ lazy_static! {
   static ref BLKZERO: BlobHash = BlobStorage::zero(BLKSIZE);
 }
 
-pub fn run(path: &str) -> Result<(), Error> {
-  let fs = FS::new();
+pub fn run(source: &str, mount: &str) -> Result<(), Error> {
+  let fs = match FS::new(source) {
+    Ok(fs) => fs,
+    Err(_) => return Err(Error::new(ErrorKind::Other, "Couldn't do the initial write")),
+  };
   let fs_mt = FuseMT::new(fs, 16);
   let options = [OsStr::new("-o"), OsStr::new("auto_unmount,default_permissions")];
-  fuse_mt::mount(fs_mt, &path, &options[..])
+  fuse_mt::mount(fs_mt, &mount, &options[..])
 }
 
 struct FSEntry {
@@ -174,7 +177,7 @@ pub struct FS {
 }
 
 impl FS {
-  pub fn new() -> FS {
+  pub fn new(source: &str) -> Result<FS, c_int> {
     let mut nodes = HashMap::new();
     let mut root = FSEntry::new(FileType::Directory);
     root.perm = 0o755;
@@ -182,16 +185,16 @@ impl FS {
     root.gid = users::get_current_gid();
     // Root node is always 0
     nodes.insert(0, root);
-    let bs = BlobStorage::new();
+    let bs = BlobStorage::new(source);
     let empty_block = [0 as u8; BLKSIZE];
-    bs.add_blob(&empty_block);
-    FS {
+    try!(bs.add_blob(&empty_block));
+    Ok(FS {
       blob_storage: bs,
       nodes: RwLock::new(nodes),
       node_counter: Mutex::new(0),
       handles: RwLock::new(HashMap::new()),
       handle_counter: Mutex::new(0),
-    }
+    })
   }
 
   fn with_path_optional_handle<F,T>(&self, path: &Path, fh: Option<u64>, closure: &F) -> Result<T, c_int>
@@ -401,9 +404,10 @@ impl FilesystemMT for FS {
     let data = target.as_os_str().as_bytes();
     let mut blockdata = [0; BLKSIZE];
     blockdata[0..data.len()].copy_from_slice(data);
+    let blob = try!(self.blob_storage.add_blob(&blockdata));
     let entry = try!(self.with_node(node, &(|parent| {
       let mut e = FSEntry::new(FileType::Symlink);
-      e.blocks = vec![self.blob_storage.add_blob(&blockdata)];
+      e.blocks = vec![blob];
       e.perm = 0o777;
       e.size = data.len() as u64;
       e.gid = parent.gid;

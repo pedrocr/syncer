@@ -56,12 +56,14 @@ impl Blob {
 }
 
 pub struct BlobStorage {
+  source: String,
   blobs: RwLock<HashMap<BlobHash, Blob>>,
 }
 
 impl BlobStorage {
-  pub fn new() -> Self {
+  pub fn new(source: &str) -> Self {
     BlobStorage {
+      source: source.to_string(),
       blobs: RwLock::new(HashMap::new()),
     }
   }
@@ -75,7 +77,7 @@ impl BlobStorage {
     let blob = try!(self.get_blob(hash));
     let new_blob = blob.write(offset, data);
     let hash = new_blob.hash;
-    self.store_blob(new_blob);
+    try!(self.store_blob(new_blob));
     Ok(hash)
   }
 
@@ -87,19 +89,20 @@ impl BlobStorage {
     }
   }
 
-  fn store_blob(&self, blob: Blob) {
+  fn store_blob(&self, blob: Blob) -> Result<(), c_int> {
     let mut blobs = self.blobs.write().unwrap();
     blobs.insert(blob.hash, blob);
+    Ok(())
   }
 
   pub fn zero(size: usize) -> BlobHash {
     Blob::zero(size).hash
   }
 
-  pub fn add_blob(&self, data: &[u8]) -> BlobHash {
+  pub fn add_blob(&self, data: &[u8]) -> Result<BlobHash, c_int> {
     let blob = Blob::new_with_data(data.to_vec());
     let hash = blob.hash;
-    self.store_blob(blob);
-    hash
+    try!(self.store_blob(blob));
+    Ok(hash)
   }
 }
