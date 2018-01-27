@@ -12,13 +12,13 @@ use self::time::Timespec;
 use self::libc::c_int;
 use std::cmp;
 use self::fuse_mt::*;
-use super::blockstorage::*;
+use super::blobstorage::*;
 use std::io::Error;
 
 const BLKSIZE: usize = 4096;
 
 lazy_static! {
-  static ref BLKZERO: BlockHash = BlobStorage::zero(BLKSIZE);
+  static ref BLKZERO: BlobHash = BlobStorage::zero(BLKSIZE);
 }
 
 pub fn run(path: &str) -> Result<(), Error> {
@@ -39,7 +39,7 @@ struct FSEntry {
   mtime: Timespec,
   ctime: Timespec,
   size: u64,
-  blocks: Vec<BlockHash>,
+  blocks: Vec<BlobHash>,
   children: HashMap<OsString, (u64, FileType)>,
 }
 
@@ -166,7 +166,7 @@ struct Handle {
 }
 
 pub struct FS {
-  block_storage: BlobStorage,
+  blob_storage: BlobStorage,
   nodes: RwLock<HashMap<u64,FSEntry>>,
   node_counter: Mutex<u64>,
   handles: RwLock<HashMap<u64,Handle>>,
@@ -184,9 +184,9 @@ impl FS {
     nodes.insert(0, root);
     let bs = BlobStorage::new();
     let empty_block = [0 as u8; BLKSIZE];
-    bs.add_block(&empty_block);
+    bs.add_blob(&empty_block);
     FS {
-      block_storage: bs,
+      blob_storage: bs,
       nodes: RwLock::new(nodes),
       node_counter: Mutex::new(0),
       handles: RwLock::new(HashMap::new()),
@@ -403,7 +403,7 @@ impl FilesystemMT for FS {
     blockdata[0..data.len()].copy_from_slice(data);
     let entry = try!(self.with_node(node, &(|parent| {
       let mut e = FSEntry::new(FileType::Symlink);
-      e.blocks = vec![self.block_storage.add_block(&blockdata)];
+      e.blocks = vec![self.blob_storage.add_blob(&blockdata)];
       e.perm = 0o777;
       e.size = data.len() as u64;
       e.gid = parent.gid;
@@ -433,15 +433,15 @@ impl FilesystemMT for FS {
   }
 
   fn write(&self, _req: RequestInfo, _path: &Path, fh: u64, offset: u64, data: Vec<u8>, _flags: u32) -> ResultWrite {
-    try!(self.modify_handle(fh, &(|entry| entry.write(&self.block_storage, offset, &data))))
+    try!(self.modify_handle(fh, &(|entry| entry.write(&self.blob_storage, offset, &data))))
   }
 
   fn read(&self, _req: RequestInfo, _path: &Path, fh: u64, offset: u64, size: u32) -> ResultData {
-    try!(self.with_handle(fh, &(|entry| entry.read(&self.block_storage, offset, size))))
+    try!(self.with_handle(fh, &(|entry| entry.read(&self.blob_storage, offset, size))))
   }
 
   fn readlink(&self, _req: RequestInfo, path: &Path) -> ResultData {
-    try!(self.with_path(path, &(|entry| entry.read(&self.block_storage, 0, BLKSIZE as u32))))
+    try!(self.with_path(path, &(|entry| entry.read(&self.blob_storage, 0, BLKSIZE as u32))))
   }
 
   fn rmdir(&self, _req: RequestInfo, parent: &Path, name: &OsStr) -> ResultEmpty {

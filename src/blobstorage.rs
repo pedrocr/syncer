@@ -9,12 +9,12 @@ extern crate libc;
 use self::libc::c_int;
 
 const HASHSIZE: usize = 20;
-pub type BlockHash = [u8;HASHSIZE];
+pub type BlobHash = [u8;HASHSIZE];
 
 #[derive(Clone)]
 struct Blob {
   data: Vec<u8>,
-  hash: BlockHash,
+  hash: BlobHash,
 }
 
 impl Blob {
@@ -46,7 +46,7 @@ impl Blob {
     Self::new_with_data(newdata)
   }
 
-  fn hash(data: &[u8]) -> BlockHash {
+  fn hash(data: &[u8]) -> BlobHash {
     let mut hasher = Blake2b::new(HASHSIZE).unwrap();
     hasher.process(data);
     let mut buf = [0u8; HASHSIZE];
@@ -56,7 +56,7 @@ impl Blob {
 }
 
 pub struct BlobStorage {
-  blobs: RwLock<HashMap<BlockHash, Blob>>,
+  blobs: RwLock<HashMap<BlobHash, Blob>>,
 }
 
 impl BlobStorage {
@@ -66,12 +66,12 @@ impl BlobStorage {
     }
   }
 
-  pub fn read(&self, hash: &BlockHash, offset: usize, bytes: usize) -> Result<Vec<u8>, c_int> {
+  pub fn read(&self, hash: &BlobHash, offset: usize, bytes: usize) -> Result<Vec<u8>, c_int> {
     let blob = try!(self.get_blob(hash));
     Ok(blob.read(offset, bytes))
   }
 
-  pub fn write(&self, hash: &BlockHash, offset: usize, data: &[u8]) -> Result<BlockHash, c_int> {
+  pub fn write(&self, hash: &BlobHash, offset: usize, data: &[u8]) -> Result<BlobHash, c_int> {
     let blob = try!(self.get_blob(hash));
     let new_blob = blob.write(offset, data);
     let hash = new_blob.hash;
@@ -79,7 +79,7 @@ impl BlobStorage {
     Ok(hash)
   }
 
-  fn get_blob(&self, hash: &BlockHash) -> Result<Blob, c_int> {
+  fn get_blob(&self, hash: &BlobHash) -> Result<Blob, c_int> {
     let blobs = self.blobs.read().unwrap();
     match blobs.get(hash) {
       Some(blob) => Ok(blob.clone()),
@@ -92,11 +92,11 @@ impl BlobStorage {
     blobs.insert(blob.hash, blob);
   }
 
-  pub fn zero(size: usize) -> BlockHash {
+  pub fn zero(size: usize) -> BlobHash {
     Blob::zero(size).hash
   }
 
-  pub fn add_block(&self, data: &[u8]) -> BlockHash {
+  pub fn add_blob(&self, data: &[u8]) -> BlobHash {
     let blob = Blob::new_with_data(data.to_vec());
     let hash = blob.hash;
     self.store_blob(blob);
