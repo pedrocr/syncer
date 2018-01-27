@@ -8,11 +8,12 @@ use std::ffi::{OsStr, OsString};
 use std::os::unix::ffi::OsStrExt;
 use std::collections::HashMap;
 use std::sync::{RwLock, Mutex};
-use self::time::Timespec;
 use self::libc::c_int;
 use std::cmp;
 use self::fuse_mt::*;
+use self::time::Timespec;
 use super::blobstorage::*;
+use super::mytime::*;
 use std::io::{Error, ErrorKind};
 
 const BLKSIZE: usize = 4096;
@@ -38,9 +39,9 @@ struct FSEntry {
   gid: u32,
   flags: u32,
   rdev: u32,
-  atime: Timespec,
-  mtime: Timespec,
-  ctime: Timespec,
+  atime: MyTimespec,
+  mtime: MyTimespec,
+  ctime: MyTimespec,
   size: u64,
   blocks: Vec<BlobHash>,
   children: HashMap<OsString, (u64, FileType)>,
@@ -48,7 +49,7 @@ struct FSEntry {
 
 impl FSEntry {
   fn new(filetype: FileType) -> FSEntry {
-    let time = self::time::get_time();
+    let time = MyTimespec::get_time();
 
     FSEntry {
       filetype,
@@ -72,10 +73,10 @@ impl FSEntry {
     FileAttr {
       size: self.size,
       blocks,
-      atime: self.atime,
-      mtime: self.mtime,
-      ctime: self.ctime,
-      crtime: self.ctime,
+      atime: self.atime.to_timespec(),
+      mtime: self.mtime.to_timespec(),
+      ctime: self.ctime.to_timespec(),
+      crtime: self.ctime.to_timespec(),
       kind: self.filetype,
       perm: self.perm as u16,
       nlink: 1,
@@ -358,8 +359,8 @@ impl FilesystemMT for FS {
 
   fn utimens(&self, _req: RequestInfo, path: &Path, fh: Option<u64>, atime: Option<Timespec>, mtime: Option<Timespec>) -> ResultEmpty {
     self.modify_path_optional_handle(path, fh, &(|entry| {
-      if let Some(atime) = atime {entry.atime = atime};
-      if let Some(mtime) = mtime {entry.mtime = mtime};
+      if let Some(atime) = atime {entry.atime = MyTimespec::from_timespec(&atime)};
+      if let Some(mtime) = mtime {entry.mtime = MyTimespec::from_timespec(&mtime)};
     }))
   }
 
@@ -373,7 +374,7 @@ impl FilesystemMT for FS {
       e
     })));
     let mut created_entry = CreatedEntry {
-      ttl: entry.ctime,
+      ttl: entry.ctime.to_timespec(),
       attr: entry.attrs(),
       fh: 0,
       flags: entry.flags,
@@ -393,7 +394,7 @@ impl FilesystemMT for FS {
       e.uid = parent.uid;
       e
     })));
-    let created_dir = (entry.ctime, entry.attrs());
+    let created_dir = (entry.ctime.to_timespec(), entry.attrs());
     let newnode = self.create_node(entry);
     try!(self.modify_node(node, &(|parent| parent.add_child(name, (newnode, FileType::Directory)))));
     Ok(created_dir)
@@ -414,7 +415,7 @@ impl FilesystemMT for FS {
       e.uid = parent.uid;
       e
     })));
-    let created_symlink = (entry.ctime, entry.attrs());
+    let created_symlink = (entry.ctime.to_timespec(), entry.attrs());
     let newnode = self.create_node(entry);
     try!(self.modify_node(node, &(|parent| parent.add_child(name, (newnode, FileType::Symlink)))));
     Ok(created_symlink)
@@ -424,7 +425,7 @@ impl FilesystemMT for FS {
     let childnode = try!(self.find_node(path));
     let dirnode = try!(self.find_node(newparent));
     let childnodeinfo = try!(self.with_node(childnode, &(|entry| {
-      ((entry.ctime, entry.attrs()), entry.filetype)
+      ((entry.ctime.to_timespec(), entry.attrs()), entry.filetype)
     })));
     try!(self.modify_node(dirnode, &(|parent| parent.add_child(newname, (childnode, childnodeinfo.1)))));
     Ok(childnodeinfo.0)
