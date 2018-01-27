@@ -33,36 +33,62 @@ pub fn run(source: &str, mount: &str) -> Result<(), Error> {
 
 #[derive(Serialize, Deserialize)]
 #[serde(remote = "Timespec")]
+#[allow(dead_code)]
 struct TimespecDef {
   sec: i64,
   nsec: i32,
 }
 
-//#[derive(Serialize, Deserialize)]
+#[derive(Copy, Clone, PartialEq, Serialize, Deserialize)]
+enum FileTypeDef {
+  NamedPipe,
+  CharDevice,
+  BlockDevice,
+  Directory,
+  RegularFile,
+  Symlink,
+  Socket,
+}
+
+impl FileTypeDef {
+  fn to_filetype(&self) -> FileType {
+    match *self {
+      FileTypeDef::NamedPipe => FileType::NamedPipe,
+      FileTypeDef::CharDevice => FileType::CharDevice,
+      FileTypeDef::BlockDevice => FileType::BlockDevice,
+      FileTypeDef::Directory => FileType::Directory,
+      FileTypeDef::RegularFile => FileType::RegularFile,
+      FileTypeDef::Symlink => FileType::Symlink,
+      FileTypeDef::Socket => FileType::Socket,
+    }
+  }
+}
+
+#[derive(Serialize, Deserialize)]
 struct FSEntry {
-  filetype: FileType,
+  filetype: FileTypeDef,
   perm: u32,
   uid: u32,
   gid: u32,
   flags: u32,
   rdev: u32,
-  //#[serde(with = "TimespecDef")]
+  #[serde(with = "TimespecDef")]
   atime: Timespec,
-  //#[serde(with = "TimespecDef")]
+  #[serde(with = "TimespecDef")]
   mtime: Timespec,
-  //#[serde(with = "TimespecDef")]
+  #[serde(with = "TimespecDef")]
   ctime: Timespec,
   size: u64,
   blocks: Vec<BlobHash>,
-  children: HashMap<OsString, (u64, FileType)>,
+  children: HashMap<OsString, (u64, FileTypeDef)>,
 }
 
 impl FSEntry {
-  fn new(filetype: FileType) -> FSEntry {
+  fn new(filetype: FileTypeDef) -> FSEntry {
     let time = self::time::get_time();
 
     FSEntry {
-      filetype,
+      filetype: filetype,
       perm: 0,
       uid: 0,
       gid: 0,
@@ -87,7 +113,7 @@ impl FSEntry {
       mtime: self.mtime,
       ctime: self.ctime,
       crtime: self.ctime,
-      kind: self.filetype,
+      kind: self.filetype.to_filetype(),
       perm: self.perm as u16,
       nlink: 1,
       uid: self.uid,
@@ -98,24 +124,24 @@ impl FSEntry {
   }
 
   fn children(&self) -> Vec<DirectoryEntry> {
-    assert!(self.filetype == FileType::Directory);
+    assert!(self.filetype == FileTypeDef::Directory);
     let mut out = Vec::new();
     out.push(DirectoryEntry{name: OsString::from("."), kind: FileType::Directory});
     out.push(DirectoryEntry{name: OsString::from(".."), kind: FileType::Directory});
     for (key, val) in self.children.iter() {
       out.push(DirectoryEntry{
         name: key.clone(),
-        kind: val.1,
+        kind: val.1.to_filetype(),
       });
     }
     out
   }
 
-  fn add_child(&mut self, name: &OsStr, node: (u64, FileType)) {
+  fn add_child(&mut self, name: &OsStr, node: (u64, FileTypeDef)) {
     self.children.insert(name.to_os_string(), node);
   }
 
-  fn remove_child(&mut self, name: &OsStr) -> Result<(u64, FileType), c_int> {
+  fn remove_child(&mut self, name: &OsStr) -> Result<(u64, FileTypeDef), c_int> {
     match self.children.remove(name) {
       None => Err(libc::ENOENT),
       Some(c) => Ok(c),
@@ -190,7 +216,7 @@ pub struct FS {
 impl FS {
   pub fn new(source: &str) -> Result<FS, c_int> {
     let mut nodes = HashMap::new();
-    let mut root = FSEntry::new(FileType::Directory);
+    let mut root = FSEntry::new(FileTypeDef::Directory);
     root.perm = 0o755;
     root.uid = users::get_current_uid();
     root.gid = users::get_current_gid();
@@ -377,7 +403,7 @@ impl FilesystemMT for FS {
   fn create(&self, _req: RequestInfo, parent: &Path, name: &OsStr, mode: u32, flags: u32) -> ResultCreate {
     let node = try!(self.find_node(parent));
     let entry = try!(self.with_node(node, &(|parent| {
-      let mut e = FSEntry::new(FileType::RegularFile);
+      let mut e = FSEntry::new(FileTypeDef::RegularFile);
       e.perm = mode;
       e.gid = parent.gid;
       e.uid = parent.uid;
@@ -391,14 +417,14 @@ impl FilesystemMT for FS {
     };
     let newnode = self.create_node(entry);
     created_entry.fh = self.create_handle(Handle{node: newnode, _flags: flags,});
-    try!(self.modify_node(node, &(|parent| parent.add_child(name, (newnode, FileType::RegularFile)))));
+    try!(self.modify_node(node, &(|parent| parent.add_child(name, (newnode, FileTypeDef::RegularFile)))));
     Ok(created_entry)
   }
 
   fn mkdir(&self, _req: RequestInfo, parent: &Path, name: &OsStr, mode: u32) -> ResultEntry {
     let node = try!(self.find_node(parent));
     let entry = try!(self.with_node(node, &(|parent| {
-      let mut e = FSEntry::new(FileType::Directory);
+      let mut e = FSEntry::new(FileTypeDef::Directory);
       e.perm = mode;
       e.gid = parent.gid;
       e.uid = parent.uid;
@@ -406,7 +432,7 @@ impl FilesystemMT for FS {
     })));
     let created_dir = (entry.ctime, entry.attrs());
     let newnode = self.create_node(entry);
-    try!(self.modify_node(node, &(|parent| parent.add_child(name, (newnode, FileType::Directory)))));
+    try!(self.modify_node(node, &(|parent| parent.add_child(name, (newnode, FileTypeDef::Directory)))));
     Ok(created_dir)
   }
 
@@ -417,7 +443,7 @@ impl FilesystemMT for FS {
     blockdata[0..data.len()].copy_from_slice(data);
     let blob = try!(self.blob_storage.add_blob(&blockdata));
     let entry = try!(self.with_node(node, &(|parent| {
-      let mut e = FSEntry::new(FileType::Symlink);
+      let mut e = FSEntry::new(FileTypeDef::Symlink);
       e.blocks = vec![blob];
       e.perm = 0o777;
       e.size = data.len() as u64;
@@ -427,7 +453,7 @@ impl FilesystemMT for FS {
     })));
     let created_symlink = (entry.ctime, entry.attrs());
     let newnode = self.create_node(entry);
-    try!(self.modify_node(node, &(|parent| parent.add_child(name, (newnode, FileType::Symlink)))));
+    try!(self.modify_node(node, &(|parent| parent.add_child(name, (newnode, FileTypeDef::Symlink)))));
     Ok(created_symlink)
   }
 
