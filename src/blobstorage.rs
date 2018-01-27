@@ -8,6 +8,7 @@ use self::libc::c_int;
 use std::path::PathBuf;
 use std::fs;
 use std::io::prelude::*;
+use std::usize;
 
 const HASHSIZE: usize = 20;
 pub type BlobHash = [u8;HASHSIZE];
@@ -113,6 +114,10 @@ impl BlobStorage {
     BlobStorage {
       source: PathBuf::from(source),
     }
+  }
+
+  pub fn read_all(&self, hash: &BlobHash) -> Result<Vec<u8>, c_int> {
+    self.read(hash, 0, usize::MAX)
   }
 
   pub fn read(&self, hash: &BlobHash, offset: usize, bytes: usize) -> Result<Vec<u8>, c_int> {

@@ -2,6 +2,7 @@ extern crate time;
 extern crate fuse_mt;
 extern crate libc;
 extern crate users;
+extern crate bincode;
 
 use std::path::Path;
 use std::ffi::{OsStr, OsString};
@@ -14,6 +15,7 @@ use std::cmp;
 use self::fuse_mt::*;
 use super::blobstorage::*;
 use std::io::{Error, ErrorKind};
+use self::bincode::{serialize, deserialize, Infinite};
 
 const BLKSIZE: usize = 4096;
 
@@ -207,7 +209,7 @@ struct Handle {
 
 pub struct FS {
   blob_storage: BlobStorage,
-  nodes: RwLock<HashMap<u64,FSEntry>>,
+  nodes: RwLock<HashMap<u64,BlobHash>>,
   node_counter: Mutex<u64>,
   handles: RwLock<HashMap<u64,Handle>>,
   handle_counter: Mutex<u64>,
@@ -221,10 +223,12 @@ impl FS {
     root.uid = users::get_current_uid();
     root.gid = users::get_current_gid();
     // Root node is always 0
-    nodes.insert(0, root);
     let bs = BlobStorage::new(source);
     let empty_block = [0 as u8; BLKSIZE];
     try!(bs.add_blob(&empty_block));
+    let encoded: Vec<u8> = serialize(&root, Infinite).unwrap();
+    let roothash = try!(bs.add_blob(&encoded));
+    nodes.insert(0, roothash);
     Ok(FS {
       blob_storage: bs,
       nodes: RwLock::new(nodes),
@@ -259,13 +263,20 @@ impl FS {
     self.with_node(node, closure)
   }
 
+  fn get_entry(&self, node: u64) -> Result<FSEntry, c_int> {
+    let nodes = self.nodes.read().unwrap();
+    let hash = match nodes.get(&node) {
+      Some(hash) => hash,
+      None => return Err(libc::ENOENT),
+    };
+    let buffer = try!(self.blob_storage.read_all(hash));
+    Ok(deserialize(&buffer[..]).unwrap())
+  }
+
   fn with_node<F,T>(&self, node: u64, closure: &F) -> Result<T, c_int>
     where F : Fn(&FSEntry) -> T {
-    let nodes = self.nodes.read().unwrap();
-    match nodes.get(&node) {
-      Some(e) => Ok(closure(e)),
-      None => return Err(libc::ENOENT),
-    }
+    let entry = try!(self.get_entry(node));
+    Ok(closure(&entry))
   }
 
   fn modify_path_optional_handle<F,T>(&self, path: &Path, fh: Option<u64>, closure: &F) -> Result<T, c_int>
@@ -293,13 +304,20 @@ impl FS {
     self.modify_node(node, closure)
   }
 
+  fn save_node(&self, node: u64, entry: &FSEntry) -> Result<(), c_int> {
+    let encoded: Vec<u8> = serialize(entry, Infinite).unwrap();
+    let hash = try!(self.blob_storage.add_blob(&encoded));
+    let mut nodes = self.nodes.write().unwrap();
+    nodes.insert(node, hash);
+    Ok(())
+  }
+
   fn modify_node<F,T>(&self, node: u64, closure: &F) -> Result<T, c_int>
     where F : Fn(&mut FSEntry) -> T {
-    let mut nodes = self.nodes.write().unwrap();
-    Ok(match nodes.get_mut(&node) {
-      Some(mut entry) => closure(&mut entry),
-      None => return Err(libc::ENOENT),
-    })
+    let mut entry = try!(self.get_entry(node));
+    let res = closure(&mut entry);
+    try!(self.save_node(node, &entry));
+    Ok(res)
   }
 
   fn find_node(&self, path: &Path) -> Result<u64, c_int> {
@@ -307,29 +325,23 @@ impl FS {
     let mut iterator = path.iter();
     iterator.next(); // Skip the root as that's already nodenum 0
     for elem in iterator {
-      let nodes = self.nodes.read().unwrap();
-      match nodes.get(&nodenum) {
+      let node = try!(self.get_entry(nodenum));
+      match node.children.get(elem) {
         None => return Err(libc::ENOENT),
-        Some(node) => {
-          match node.children.get(elem) {
-            None => return Err(libc::ENOENT),
-            Some(&(num,_)) => nodenum = num,
-          }
-        },
+        Some(&(num,_)) => nodenum = num,
       }
     }
     Ok(nodenum)
   }
 
-  fn create_node(&self, entry: FSEntry) -> u64 {
+  fn create_node(&self, entry: FSEntry) -> Result<u64, c_int> {
     let node = {
       let mut counter = self.node_counter.lock().unwrap();
       *counter += 1;
       *counter
     };
-    let mut nodes = self.nodes.write().unwrap();
-    nodes.insert(node, entry);
-    node
+    try!(self.save_node(node, &entry));
+    Ok(node)
   }
 
   fn create_handle(&self, handle: Handle) -> u64 {
@@ -415,7 +427,7 @@ impl FilesystemMT for FS {
       fh: 0,
       flags: entry.flags,
     };
-    let newnode = self.create_node(entry);
+    let newnode = try!(self.create_node(entry));
     created_entry.fh = self.create_handle(Handle{node: newnode, _flags: flags,});
     try!(self.modify_node(node, &(|parent| parent.add_child(name, (newnode, FileTypeDef::RegularFile)))));
     Ok(created_entry)
@@ -431,7 +443,7 @@ impl FilesystemMT for FS {
       e
     })));
     let created_dir = (entry.ctime, entry.attrs());
-    let newnode = self.create_node(entry);
+    let newnode = try!(self.create_node(entry));
     try!(self.modify_node(node, &(|parent| parent.add_child(name, (newnode, FileTypeDef::Directory)))));
     Ok(created_dir)
   }
@@ -452,7 +464,7 @@ impl FilesystemMT for FS {
       e
     })));
     let created_symlink = (entry.ctime, entry.attrs());
-    let newnode = self.create_node(entry);
+    let newnode = try!(self.create_node(entry));
     try!(self.modify_node(node, &(|parent| parent.add_child(name, (newnode, FileTypeDef::Symlink)))));
     Ok(created_symlink)
   }
