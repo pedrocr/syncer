@@ -33,11 +33,11 @@ impl Blob {
 
   fn get_path(path: &PathBuf, hash: &BlobHash) -> PathBuf {
     let mut path = path.clone();
-    // Three levels of fanout should allow >20TB easily
-    path.push(format!("{:x}", hash[0]));
-    path.push(format!("{:x}", hash[1]));
-    path.push(format!("{:x}", hash[2]));
-    path.push(hex::encode(hash));
+    // 6 bytes of fanout should allow >20TB easily
+    let filename = hex::encode(hash);
+    path.push(&filename[0..3]);
+    path.push(&filename[3..6]);
+    path.push(filename);
     path
   }
 
