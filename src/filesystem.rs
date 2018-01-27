@@ -15,7 +15,11 @@ use self::fuse_mt::*;
 use super::blockstorage::*;
 use std::io::Error;
 
-pub const BLKSIZE: usize = 4096;
+const BLKSIZE: usize = 4096;
+
+lazy_static! {
+  static ref BLKZERO: BlockHash = BlobStorage::zero(BLKSIZE);
+}
 
 pub fn run(path: &str) -> Result<(), Error> {
   let fs = FS::new();
@@ -108,7 +112,7 @@ impl FSEntry {
     self.size = cmp::max(self.size, offset + data.len() as u64);
     let total_needed_blocks = (self.size as usize + BLKSIZE - 1) / BLKSIZE;
     if total_needed_blocks > self.blocks.len() {
-      self.blocks.resize(total_needed_blocks, BlobStorage::zero(BLKSIZE));
+      self.blocks.resize(total_needed_blocks, *BLKZERO);
     }
 
     let start = offset as usize;
