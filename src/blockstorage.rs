@@ -5,6 +5,8 @@ extern crate blake2;
 use self::blake2::Blake2b;
 use self::blake2::digest::{Input, VariableOutput};
 extern crate hex;
+extern crate libc;
+use self::libc::c_int;
 
 const HASHSIZE: usize = 20;
 pub type BlockHash = [u8;HASHSIZE];
@@ -64,24 +66,24 @@ impl BlobStorage {
     }
   }
 
-  pub fn read(&self, hash: &BlockHash, offset: usize, bytes: usize) -> Vec<u8> {
-    let blob = self.get_blob(hash);
-    blob.read(offset, bytes)
+  pub fn read(&self, hash: &BlockHash, offset: usize, bytes: usize) -> Result<Vec<u8>, c_int> {
+    let blob = try!(self.get_blob(hash));
+    Ok(blob.read(offset, bytes))
   }
 
-  pub fn write(&self, hash: &BlockHash, offset: usize, data: &[u8]) -> BlockHash {
-    let blob = self.get_blob(hash);
+  pub fn write(&self, hash: &BlockHash, offset: usize, data: &[u8]) -> Result<BlockHash, c_int> {
+    let blob = try!(self.get_blob(hash));
     let new_blob = blob.write(offset, data);
     let hash = new_blob.hash;
     self.store_blob(new_blob);
-    hash
+    Ok(hash)
   }
 
-  fn get_blob(&self, hash: &BlockHash) -> Blob {
+  fn get_blob(&self, hash: &BlockHash) -> Result<Blob, c_int> {
     let blobs = self.blobs.read().unwrap();
     match blobs.get(hash) {
-      Some(blob) => blob.clone(),
-      None => Blob::zero(1), // FIXME: return error
+      Some(blob) => Ok(blob.clone()),
+      None => Err(libc::EIO),
     }
   }
 
