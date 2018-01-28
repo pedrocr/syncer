@@ -6,9 +6,9 @@ extern crate crossbeam;
 
 use std::io::{Error, ErrorKind};
 use std::ffi::{OsStr};
-use std::thread;
 use std::time;
 use std::mem;
+use std::sync::mpsc;
 
 mod filesystem;
 mod backingstore;
@@ -33,14 +33,17 @@ pub fn run(source: &str, mount: &str) -> Result<(), Error> {
   };
   let fs = fix_lifetime(fs);
   let bsref = &bs;
+  let (tx, rx) = mpsc::channel();
 
   crossbeam::scope(|scope| {
-    scope.spawn(|| {
+    let synchandle = scope.spawn(move || {
       // Sync the backing store to disk every 60 seconds
       let dur = time::Duration::from_millis(60000);
       loop {
-        bsref.sync().unwrap();
-        thread::sleep(dur);
+        match rx.recv_timeout(dur) {
+          Err(mpsc::RecvTimeoutError::Timeout) => bsref.sync().unwrap(),
+          _ => break,
+        }
       }
     });
 
@@ -49,6 +52,10 @@ pub fn run(source: &str, mount: &str) -> Result<(), Error> {
       let options = [OsStr::new("-o"), OsStr::new("auto_unmount,default_permissions")];
       fuse_mt::mount(fs_mt, &mount, &options[..])
     });
-    fshandle.join()
+
+    let ret = fshandle.join();
+    tx.send(0).unwrap(); // Signal the fsync thread to die
+    synchandle.join();
+    ret
   })
 }
