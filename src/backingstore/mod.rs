@@ -11,13 +11,15 @@ use super::filesystem::FSEntry;
 
 use self::bincode::{serialize, deserialize, Infinite};
 use self::libc::c_int;
-use std::sync::Mutex;
+use std::sync::{Mutex, RwLock};
+use std::collections::HashMap;
 use std::fs;
 
 pub struct BackingStore {
   blobs: BlobStorage,
   nodes: MetadataDB,
   node_counter: Mutex<u64>,
+  node_cache: RwLock<HashMap<u64, FSEntry>>,
 }
 
 impl BackingStore {
@@ -27,11 +29,14 @@ impl BackingStore {
       Err(_) => return Err(libc::EIO),
     }
 
-    Ok(Self {
+    let bs = Self {
       blobs: BlobStorage::new(path),
       nodes: MetadataDB::new(path),
       node_counter: Mutex::new(0),
-    })
+      node_cache: RwLock::new(HashMap::new()),
+    };
+
+    Ok(bs)
   }
 
   pub fn blob_zero(size: usize) -> BlobHash {
@@ -48,21 +53,27 @@ impl BackingStore {
       *counter += 1;
       *counter
     };
-    try!(self.save_node(node, &entry));
+    try!(self.save_node(node, entry));
     Ok(node)
   }
 
-  pub fn save_node(&self, node: u64, entry: &FSEntry) -> Result<(), c_int> {
-    let encoded: Vec<u8> = serialize(entry, Infinite).unwrap();
-    let hash = try!(self.blobs.add_blob(&encoded));
-    try!(self.nodes.set(node, &hash));
+  pub fn save_node(&self, node: u64, entry: FSEntry) -> Result<(), c_int> {
+    let mut nodes = self.node_cache.write().unwrap();
+    nodes.insert(node, entry);
     Ok(())
   }
 
   pub fn get_node(&self, node: u64) -> Result<FSEntry, c_int> {
-    let hash = try!(self.nodes.get(node));
-    let buffer = try!(self.blobs.read_all(&hash));
-    Ok(deserialize(&buffer[..]).unwrap())
+    let nodes = self.node_cache.read().unwrap();
+    match nodes.get(&node) {
+      Some(n) => Ok((*n).clone()),
+      None => {
+        // We're in the slow path where we actually need to fetch stuff from disk
+        let hash = try!(self.nodes.get(node));
+        let buffer = try!(self.blobs.read_all(&hash));
+        Ok(deserialize(&buffer[..]).unwrap())
+      },
+    }
   }
 
   pub fn read(&self, hash: &BlobHash, offset: usize, bytes: usize) -> Result<Vec<u8>, c_int> {
@@ -71,5 +82,15 @@ impl BackingStore {
 
   pub fn write(&self, hash: &BlobHash, offset: usize, data: &[u8]) -> Result<BlobHash, c_int> {
     self.blobs.write(hash, offset, data)
+  }
+
+  pub fn sync(&self) -> Result<(), c_int> {
+    let mut nodes = self.node_cache.write().unwrap();
+    for (node, entry) in nodes.drain() {
+      let encoded: Vec<u8> = serialize(&entry, Infinite).unwrap();
+      let hash = try!(self.blobs.add_blob(&encoded));
+      try!(self.nodes.set(node, &hash));
+    }
+    Ok(())
   }
 }

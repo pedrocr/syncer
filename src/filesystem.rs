@@ -13,22 +13,11 @@ use self::libc::c_int;
 use std::cmp;
 use self::fuse_mt::*;
 use super::backingstore::*;
-use std::io::{Error, ErrorKind};
 
 const BLKSIZE: usize = 4096;
 
 lazy_static! {
   static ref BLKZERO: BlobHash = BackingStore::blob_zero(BLKSIZE);
-}
-
-pub fn run(source: &str, mount: &str) -> Result<(), Error> {
-  let fs = match FS::new(source) {
-    Ok(fs) => fs,
-    Err(_) => return Err(Error::new(ErrorKind::Other, "Couldn't do the initial write")),
-  };
-  let fs_mt = FuseMT::new(fs, 16);
-  let options = [OsStr::new("-o"), OsStr::new("auto_unmount,default_permissions")];
-  fuse_mt::mount(fs_mt, &mount, &options[..])
 }
 
 #[derive(Serialize, Deserialize)]
@@ -64,7 +53,7 @@ impl FileTypeDef {
   }
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize)]
 pub struct FSEntry {
   filetype: FileTypeDef,
   perm: u32,
@@ -206,16 +195,16 @@ struct Handle {
   _flags: u32,
 }
 
-pub struct FS {
-  backing: BackingStore,
+pub struct FS<'a> {
+  backing: &'a BackingStore,
   handles: RwLock<HashMap<u64,Handle>>,
   handle_counter: Mutex<u64>,
 }
 
-impl FS {
-  pub fn new(source: &str) -> Result<FS, c_int> {
+impl<'a> FS<'a> {
+  pub fn new(bs: &'a BackingStore) -> Result<FS<'a>, c_int> {
     let fs = FS {
-      backing: try!(BackingStore::new(source)),
+      backing: bs,
       handles: RwLock::new(HashMap::new()),
       handle_counter: Mutex::new(0),
     };
@@ -232,7 +221,7 @@ impl FS {
         root.perm = 0o755;
         root.uid = users::get_current_uid();
         root.gid = users::get_current_gid();
-        try!(fs.backing.save_node(0, &root));
+        try!(fs.backing.save_node(0, root));
       }
     }
     Ok(fs)
@@ -298,7 +287,7 @@ impl FS {
     where F : Fn(&mut FSEntry) -> T {
     let mut entry = try!(self.backing.get_node(node));
     let res = closure(&mut entry);
-    try!(self.backing.save_node(node, &entry));
+    try!(self.backing.save_node(node, entry));
     Ok(res)
   }
 
@@ -333,7 +322,7 @@ impl FS {
   }
 }
 
-impl FilesystemMT for FS {
+impl<'a> FilesystemMT for FS<'a> {
   fn init(&self, _req:RequestInfo) -> ResultEmpty {
     Ok(())
   }

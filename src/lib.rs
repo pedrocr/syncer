@@ -1,7 +1,54 @@
 #[macro_use] extern crate lazy_static;
 #[macro_use] extern crate serde_derive;
+extern crate fuse_mt;
+use self::fuse_mt::*;
+extern crate crossbeam;
+
+use std::io::{Error, ErrorKind};
+use std::ffi::{OsStr};
+use std::thread;
+use std::time;
+use std::mem;
 
 mod filesystem;
 mod backingstore;
 
-pub use filesystem::run;
+use self::backingstore::BackingStore;
+use self::filesystem::FS;
+
+// This is a hack while FuseMT requires 'static for the FilesystemMT instance
+// See the github issue for discussion: https://github.com/wfraser/fuse-mt/issues/26
+fn fix_lifetime<'a>(t: FS<'a>) -> FS<'static> {
+  unsafe { mem::transmute(t) }
+}
+
+pub fn run(source: &str, mount: &str) -> Result<(), Error> {
+  let bs = match BackingStore::new(source) {
+    Ok(bs) => bs,
+    Err(_) => return Err(Error::new(ErrorKind::Other, "Couldn't create the backing store")),
+  };
+  let fs = match filesystem::FS::new(&bs) {
+    Ok(fs) => fs,
+    Err(_) => return Err(Error::new(ErrorKind::Other, "Couldn't create the filesystem")),
+  };
+  let fs = fix_lifetime(fs);
+  let bsref = &bs;
+
+  crossbeam::scope(|scope| {
+    scope.spawn(|| {
+      // Sync the backing store to disk every 60 seconds
+      let dur = time::Duration::from_millis(60000);
+      loop {
+        bsref.sync().unwrap();
+        thread::sleep(dur);
+      }
+    });
+
+    let fshandle = scope.spawn(move || {
+      let fs_mt = FuseMT::new(fs, 16);
+      let options = [OsStr::new("-o"), OsStr::new("auto_unmount,default_permissions")];
+      fuse_mt::mount(fs_mt, &mount, &options[..])
+    });
+    fshandle.join()
+  })
+}
