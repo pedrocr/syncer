@@ -2,7 +2,6 @@ extern crate time;
 extern crate fuse_mt;
 extern crate libc;
 extern crate users;
-extern crate bincode;
 
 use std::path::Path;
 use std::ffi::{OsStr, OsString};
@@ -13,15 +12,13 @@ use self::time::Timespec;
 use self::libc::c_int;
 use std::cmp;
 use self::fuse_mt::*;
-use super::blobstorage::*;
-use super::metadatadb::*;
+use super::backingstore::*;
 use std::io::{Error, ErrorKind};
-use self::bincode::{serialize, deserialize, Infinite};
 
 const BLKSIZE: usize = 4096;
 
 lazy_static! {
-  static ref BLKZERO: BlobHash = BlobStorage::zero(BLKSIZE);
+  static ref BLKZERO: BlobHash = BackingStore::blob_zero(BLKSIZE);
 }
 
 pub fn run(source: &str, mount: &str) -> Result<(), Error> {
@@ -68,7 +65,7 @@ impl FileTypeDef {
 }
 
 #[derive(Serialize, Deserialize)]
-struct FSEntry {
+pub struct FSEntry {
   filetype: FileTypeDef,
   perm: u32,
   uid: u32,
@@ -151,7 +148,7 @@ impl FSEntry {
     }
   }
 
-  fn write(&mut self, bs: &BlobStorage, offset: u64, data: &[u8]) -> Result<u32, c_int> {
+  fn write(&mut self, bs: &BackingStore, offset: u64, data: &[u8]) -> Result<u32, c_int> {
     self.size = cmp::max(self.size, offset + data.len() as u64);
     let total_needed_blocks = (self.size as usize + BLKSIZE - 1) / BLKSIZE;
     if total_needed_blocks > self.blocks.len() {
@@ -178,7 +175,7 @@ impl FSEntry {
     Ok(written as u32)
   }
 
-  fn read(&self, bs: &BlobStorage, offset: u64, size: u32) -> Result<Vec<u8>, c_int> {
+  fn read(&self, bs: &BackingStore, offset: u64, size: u32) -> Result<Vec<u8>, c_int> {
     if offset >= self.size {
       // We're asking for an out of bounds offset
       return Ok(Vec::new())
@@ -210,35 +207,32 @@ struct Handle {
 }
 
 pub struct FS {
-  blob_storage: BlobStorage,
-  nodes: MetadataDB,
-  node_counter: Mutex<u64>,
+  backing: BackingStore,
   handles: RwLock<HashMap<u64,Handle>>,
   handle_counter: Mutex<u64>,
 }
 
 impl FS {
   pub fn new(source: &str) -> Result<FS, c_int> {
-    let bs = BlobStorage::new(source);
-    let empty_block = [0 as u8; BLKSIZE];
-    try!(bs.add_blob(&empty_block));
     let fs = FS {
-      blob_storage: bs,
-      nodes: MetadataDB::new(source),
-      node_counter: Mutex::new(0),
+      backing: try!(BackingStore::new(source)),
       handles: RwLock::new(HashMap::new()),
       handle_counter: Mutex::new(0),
     };
 
+    // Make sure the empty block exists
+    let empty_block = [0 as u8; BLKSIZE];
+    try!(fs.backing.add_blob(&empty_block));
+
     // Add a root node as 0 if it doesn't exist
-    match fs.get_entry(0) {
+    match fs.backing.get_node(0) {
       Ok(_) => {},
       Err(_) => {
         let mut root = FSEntry::new(FileTypeDef::Directory);
         root.perm = 0o755;
         root.uid = users::get_current_uid();
         root.gid = users::get_current_gid();
-        try!(fs.save_node(0, &root));
+        try!(fs.backing.save_node(0, &root));
       }
     }
     Ok(fs)
@@ -269,15 +263,9 @@ impl FS {
     self.with_node(node, closure)
   }
 
-  fn get_entry(&self, node: u64) -> Result<FSEntry, c_int> {
-    let hash = try!(self.nodes.get(node));
-    let buffer = try!(self.blob_storage.read_all(&hash));
-    Ok(deserialize(&buffer[..]).unwrap())
-  }
-
   fn with_node<F,T>(&self, node: u64, closure: &F) -> Result<T, c_int>
     where F : Fn(&FSEntry) -> T {
-    let entry = try!(self.get_entry(node));
+    let entry = try!(self.backing.get_node(node));
     Ok(closure(&entry))
   }
 
@@ -306,18 +294,11 @@ impl FS {
     self.modify_node(node, closure)
   }
 
-  fn save_node(&self, node: u64, entry: &FSEntry) -> Result<(), c_int> {
-    let encoded: Vec<u8> = serialize(entry, Infinite).unwrap();
-    let hash = try!(self.blob_storage.add_blob(&encoded));
-    try!(self.nodes.set(node, &hash));
-    Ok(())
-  }
-
   fn modify_node<F,T>(&self, node: u64, closure: &F) -> Result<T, c_int>
     where F : Fn(&mut FSEntry) -> T {
-    let mut entry = try!(self.get_entry(node));
+    let mut entry = try!(self.backing.get_node(node));
     let res = closure(&mut entry);
-    try!(self.save_node(node, &entry));
+    try!(self.backing.save_node(node, &entry));
     Ok(res)
   }
 
@@ -326,23 +307,13 @@ impl FS {
     let mut iterator = path.iter();
     iterator.next(); // Skip the root as that's already nodenum 0
     for elem in iterator {
-      let node = try!(self.get_entry(nodenum));
+      let node = try!(self.backing.get_node(nodenum));
       match node.children.get(elem) {
         None => return Err(libc::ENOENT),
         Some(&(num,_)) => nodenum = num,
       }
     }
     Ok(nodenum)
-  }
-
-  fn create_node(&self, entry: FSEntry) -> Result<u64, c_int> {
-    let node = {
-      let mut counter = self.node_counter.lock().unwrap();
-      *counter += 1;
-      *counter
-    };
-    try!(self.save_node(node, &entry));
-    Ok(node)
   }
 
   fn create_handle(&self, handle: Handle) -> u64 {
@@ -428,7 +399,7 @@ impl FilesystemMT for FS {
       fh: 0,
       flags: entry.flags,
     };
-    let newnode = try!(self.create_node(entry));
+    let newnode = try!(self.backing.create_node(entry));
     created_entry.fh = self.create_handle(Handle{node: newnode, _flags: flags,});
     try!(self.modify_node(node, &(|parent| parent.add_child(name, (newnode, FileTypeDef::RegularFile)))));
     Ok(created_entry)
@@ -444,7 +415,7 @@ impl FilesystemMT for FS {
       e
     })));
     let created_dir = (entry.ctime, entry.attrs());
-    let newnode = try!(self.create_node(entry));
+    let newnode = try!(self.backing.create_node(entry));
     try!(self.modify_node(node, &(|parent| parent.add_child(name, (newnode, FileTypeDef::Directory)))));
     Ok(created_dir)
   }
@@ -454,7 +425,7 @@ impl FilesystemMT for FS {
     let data = target.as_os_str().as_bytes();
     let mut blockdata = [0; BLKSIZE];
     blockdata[0..data.len()].copy_from_slice(data);
-    let blob = try!(self.blob_storage.add_blob(&blockdata));
+    let blob = try!(self.backing.add_blob(&blockdata));
     let entry = try!(self.with_node(node, &(|parent| {
       let mut e = FSEntry::new(FileTypeDef::Symlink);
       e.blocks = vec![blob];
@@ -465,7 +436,7 @@ impl FilesystemMT for FS {
       e
     })));
     let created_symlink = (entry.ctime, entry.attrs());
-    let newnode = try!(self.create_node(entry));
+    let newnode = try!(self.backing.create_node(entry));
     try!(self.modify_node(node, &(|parent| parent.add_child(name, (newnode, FileTypeDef::Symlink)))));
     Ok(created_symlink)
   }
@@ -487,15 +458,15 @@ impl FilesystemMT for FS {
   }
 
   fn write(&self, _req: RequestInfo, _path: &Path, fh: u64, offset: u64, data: Vec<u8>, _flags: u32) -> ResultWrite {
-    try!(self.modify_handle(fh, &(|entry| entry.write(&self.blob_storage, offset, &data))))
+    try!(self.modify_handle(fh, &(|entry| entry.write(&self.backing, offset, &data))))
   }
 
   fn read(&self, _req: RequestInfo, _path: &Path, fh: u64, offset: u64, size: u32) -> ResultData {
-    try!(self.with_handle(fh, &(|entry| entry.read(&self.blob_storage, offset, size))))
+    try!(self.with_handle(fh, &(|entry| entry.read(&self.backing, offset, size))))
   }
 
   fn readlink(&self, _req: RequestInfo, path: &Path) -> ResultData {
-    try!(self.with_path(path, &(|entry| entry.read(&self.blob_storage, 0, BLKSIZE as u32))))
+    try!(self.with_path(path, &(|entry| entry.read(&self.backing, 0, BLKSIZE as u32))))
   }
 
   fn rmdir(&self, _req: RequestInfo, parent: &Path, name: &OsStr) -> ResultEmpty {

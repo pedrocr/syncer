@@ -2,7 +2,6 @@
 #[macro_use] extern crate serde_derive;
 
 mod filesystem;
-mod blobstorage;
-mod metadatadb;
+mod backingstore;
 
 pub use filesystem::run;
