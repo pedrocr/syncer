@@ -10,7 +10,7 @@ use std::fs;
 use std::io::prelude::*;
 use std::usize;
 
-const HASHSIZE: usize = 20;
+pub const HASHSIZE: usize = 20;
 pub type BlobHash = [u8;HASHSIZE];
 
 #[derive(Clone)]

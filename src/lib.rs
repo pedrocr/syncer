@@ -3,5 +3,6 @@
 
 mod filesystem;
 mod blobstorage;
+mod metadatadb;
 
 pub use filesystem::run;

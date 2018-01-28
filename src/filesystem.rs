@@ -14,6 +14,7 @@ use self::libc::c_int;
 use std::cmp;
 use self::fuse_mt::*;
 use super::blobstorage::*;
+use super::metadatadb::*;
 use std::io::{Error, ErrorKind};
 use self::bincode::{serialize, deserialize, Infinite};
 
@@ -210,7 +211,7 @@ struct Handle {
 
 pub struct FS {
   blob_storage: BlobStorage,
-  nodes: RwLock<HashMap<u64,BlobHash>>,
+  nodes: MetadataDB,
   node_counter: Mutex<u64>,
   handles: RwLock<HashMap<u64,Handle>>,
   handle_counter: Mutex<u64>,
@@ -218,25 +219,29 @@ pub struct FS {
 
 impl FS {
   pub fn new(source: &str) -> Result<FS, c_int> {
-    let mut nodes = HashMap::new();
-    let mut root = FSEntry::new(FileTypeDef::Directory);
-    root.perm = 0o755;
-    root.uid = users::get_current_uid();
-    root.gid = users::get_current_gid();
-    // Root node is always 0
     let bs = BlobStorage::new(source);
     let empty_block = [0 as u8; BLKSIZE];
     try!(bs.add_blob(&empty_block));
-    let encoded: Vec<u8> = serialize(&root, Infinite).unwrap();
-    let roothash = try!(bs.add_blob(&encoded));
-    nodes.insert(0, roothash);
-    Ok(FS {
+    let fs = FS {
       blob_storage: bs,
-      nodes: RwLock::new(nodes),
+      nodes: MetadataDB::new(source),
       node_counter: Mutex::new(0),
       handles: RwLock::new(HashMap::new()),
       handle_counter: Mutex::new(0),
-    })
+    };
+
+    // Add a root node as 0 if it doesn't exist
+    match fs.get_entry(0) {
+      Ok(_) => {},
+      Err(_) => {
+        let mut root = FSEntry::new(FileTypeDef::Directory);
+        root.perm = 0o755;
+        root.uid = users::get_current_uid();
+        root.gid = users::get_current_gid();
+        try!(fs.save_node(0, &root));
+      }
+    }
+    Ok(fs)
   }
 
   fn with_path_optional_handle<F,T>(&self, path: &Path, fh: Option<u64>, closure: &F) -> Result<T, c_int>
@@ -265,12 +270,8 @@ impl FS {
   }
 
   fn get_entry(&self, node: u64) -> Result<FSEntry, c_int> {
-    let nodes = self.nodes.read().unwrap();
-    let hash = match nodes.get(&node) {
-      Some(hash) => hash,
-      None => return Err(libc::ENOENT),
-    };
-    let buffer = try!(self.blob_storage.read_all(hash));
+    let hash = try!(self.nodes.get(node));
+    let buffer = try!(self.blob_storage.read_all(&hash));
     Ok(deserialize(&buffer[..]).unwrap())
   }
 
@@ -308,8 +309,7 @@ impl FS {
   fn save_node(&self, node: u64, entry: &FSEntry) -> Result<(), c_int> {
     let encoded: Vec<u8> = serialize(entry, Infinite).unwrap();
     let hash = try!(self.blob_storage.add_blob(&encoded));
-    let mut nodes = self.nodes.write().unwrap();
-    nodes.insert(node, hash);
+    try!(self.nodes.set(node, &hash));
     Ok(())
   }
 
