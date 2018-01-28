@@ -173,6 +173,7 @@ impl FSEntry {
       written += bsize;
     }
     assert!(written == data.len());
+    self.mtime = self::time::get_time();
     Ok(written as u32)
   }
 
