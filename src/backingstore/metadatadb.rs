@@ -1,5 +1,6 @@
 extern crate rusqlite;
 extern crate libc;
+extern crate hex;
 use self::rusqlite::Connection;
 use std::path::PathBuf;
 use std::sync::Mutex;
@@ -18,7 +19,7 @@ impl MetadataDB {
 
     connection.execute("CREATE TABLE IF NOT EXISTS nodes (
                         id              INTEGER PRIMARY KEY,
-                        hash            BLOB
+                        hash            TEXT
                         )", &[]).unwrap();
 
     Self {
@@ -33,10 +34,11 @@ impl MetadataDB {
       Ok(hash) => hash,
       Err(_) => return Err(libc::EIO),
     };
-    assert!(hash.len() == HASHSIZE);
+    assert!(hash.len() == HASHSIZE*2);
     let mut hasharray = [0; HASHSIZE];
+    let vals = hex::decode(hash).unwrap();
     for i in 0..HASHSIZE {
-      hasharray[i] = hash[i];
+      hasharray[i] = vals[i];
     }
     Ok(hasharray)
   }
@@ -45,7 +47,7 @@ impl MetadataDB {
     let conn = self.connection.lock().unwrap();
     let hash = hash.to_vec();
     conn.execute("INSERT OR REPLACE INTO nodes (id, hash) VALUES (?1, ?2)",
-                 &[&(node as i64), &hash]).unwrap();
+                 &[&(node as i64), &(hex::encode(hash))]).unwrap();
     Ok(())
   }
 }
