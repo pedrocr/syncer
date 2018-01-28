@@ -283,7 +283,26 @@ impl<'a> FS<'a> {
     self.modify_node(node, closure)
   }
 
+  fn modify_handle_lazy<F,T>(&self, handle: u64, closure: &F) -> Result<T, c_int>
+    where F : Fn(&mut FSEntry) -> T {
+    let node = {
+      let handles = self.handles.read().unwrap();
+      match handles.get(&handle) {
+        Some(h) => h.node,
+        None => return Err(libc::EBADF),
+      }
+    };
+    self.modify_node_lazy(node, closure)
+  }
+
   fn modify_node<F,T>(&self, node: u64, closure: &F) -> Result<T, c_int>
+    where F : Fn(&mut FSEntry) -> T {
+    let res = try!(self.modify_node_lazy(node, closure));
+    try!(self.backing.sync());
+    Ok(res)
+  }
+
+  fn modify_node_lazy<F,T>(&self, node: u64, closure: &F) -> Result<T, c_int>
     where F : Fn(&mut FSEntry) -> T {
     let mut entry = try!(self.backing.get_node(node));
     let res = closure(&mut entry);
@@ -316,9 +335,11 @@ impl<'a> FS<'a> {
     count
   }
 
-  fn delete_handle(&self, handle: u64) {
+  fn delete_handle(&self, handle: u64) -> Result<(), c_int> {
     let mut handles = self.handles.write().unwrap();
     handles.remove(&handle);
+    try!(self.backing.sync());
+    Ok(())
   }
 }
 
@@ -338,8 +359,7 @@ impl<'a> FilesystemMT for FS<'a> {
   }
 
   fn release(&self, _req: RequestInfo, _path: &Path, fh: u64, _flags: u32, _lock_owner: u64, _flush: bool) -> ResultEmpty {
-    self.delete_handle(fh);
-    Ok(())
+    self.delete_handle(fh)
   }
 
   fn getattr(&self, _req: RequestInfo, path: &Path, fh: Option<u64>) -> ResultEntry {
@@ -447,7 +467,7 @@ impl<'a> FilesystemMT for FS<'a> {
   }
 
   fn write(&self, _req: RequestInfo, _path: &Path, fh: u64, offset: u64, data: Vec<u8>, _flags: u32) -> ResultWrite {
-    try!(self.modify_handle(fh, &(|entry| entry.write(&self.backing, offset, &data))))
+    try!(self.modify_handle_lazy(fh, &(|entry| entry.write(&self.backing, offset, &data))))
   }
 
   fn read(&self, _req: RequestInfo, _path: &Path, fh: u64, offset: u64, size: u32) -> ResultData {
