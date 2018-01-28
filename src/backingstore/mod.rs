@@ -1,5 +1,6 @@
 extern crate bincode;
 extern crate libc;
+extern crate rusqlite;
 
 mod blobstorage;
 mod metadatadb;
@@ -11,8 +12,10 @@ use super::filesystem::FSEntry;
 
 use self::bincode::{serialize, deserialize, Infinite};
 use self::libc::c_int;
+use self::rusqlite::Connection;
 use std::sync::{Mutex, RwLock};
 use std::collections::HashMap;
+use std::path::PathBuf;
 
 pub struct BackingStore {
   blobs: BlobStorage,
@@ -23,13 +26,17 @@ pub struct BackingStore {
 
 impl BackingStore {
   pub fn new(path: &str) -> Result<Self, c_int> {
-    // This makes sure that the path exists so when MetadataDB creates the database it
-    // will always work
+    // This makes sure that the path exists to next be used to create the DB
     let bs = try!(BlobStorage::new(path));
+
+    // Create the db file to pass to MetadataDB
+    let mut file = PathBuf::from(path);
+    file.push("metadata.sqlite3");
+    let connection = Connection::open(&file).unwrap();
 
     Ok(Self {
       blobs: bs,
-      nodes: MetadataDB::new(path),
+      nodes: MetadataDB::new(connection),
       node_counter: Mutex::new(0),
       node_cache: RwLock::new(HashMap::new()),
     })
