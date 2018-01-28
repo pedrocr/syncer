@@ -13,7 +13,6 @@ use self::bincode::{serialize, deserialize, Infinite};
 use self::libc::c_int;
 use std::sync::{Mutex, RwLock};
 use std::collections::HashMap;
-use std::fs;
 
 pub struct BackingStore {
   blobs: BlobStorage,
@@ -24,19 +23,16 @@ pub struct BackingStore {
 
 impl BackingStore {
   pub fn new(path: &str) -> Result<Self, c_int> {
-    match fs::create_dir_all(&path) {
-      Ok(_) => {},
-      Err(_) => return Err(libc::EIO),
-    }
+    // This makes sure that the path exists so when MetadataDB creates the database it
+    // will always work
+    let bs = try!(BlobStorage::new(path));
 
-    let bs = Self {
-      blobs: BlobStorage::new(path),
+    Ok(Self {
+      blobs: bs,
       nodes: MetadataDB::new(path),
       node_counter: Mutex::new(0),
       node_cache: RwLock::new(HashMap::new()),
-    };
-
-    Ok(bs)
+    })
   }
 
   pub fn blob_zero(size: usize) -> BlobHash {

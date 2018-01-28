@@ -33,12 +33,12 @@ impl Blob {
   }
 
   fn get_path(path: &PathBuf, hash: &BlobHash) -> PathBuf {
+    // As far as I can tell from online references there's no penalty in ext4 for
+    // random lookup in a directory with lots of files. So just store all the hashed
+    // files in a straight directory with no fanout to not waste space with directory
+    // entries. Just doing a 12bit fanout (4096 directories) wastes 17MB on ext4.
     let mut path = path.clone();
-    // 6 bytes of fanout should allow >20TB easily
-    let filename = hex::encode(hash);
-    path.push(&filename[0..3]);
-    path.push(&filename[3..6]);
-    path.push(filename);
+    path.push(hex::encode(hash));
     path
   }
 
@@ -63,11 +63,6 @@ impl Blob {
   fn store(&self, path: &PathBuf) -> Result<(), c_int> {
     let path = Self::get_path(path, &self.hash);
     if !path.exists() {
-      let dir = path.parent().unwrap();
-      match fs::create_dir_all(&dir) {
-        Ok(_) => {},
-        Err(_) => return Err(libc::EIO),
-      }
       let mut file = match fs::File::create(&path) {
         Ok(f) => f,
         Err(_) => return Err(libc::EIO),
@@ -110,10 +105,17 @@ pub struct BlobStorage {
 }
 
 impl BlobStorage {
-  pub fn new(source: &str) -> Self {
-    BlobStorage {
-      source: PathBuf::from(source),
+  pub fn new(source: &str) -> Result<Self, c_int> {
+    let mut path = PathBuf::from(source);
+    path.push("blobs");
+    match fs::create_dir_all(&path) {
+      Ok(_) => {},
+      Err(_) => return Err(libc::EIO),
     }
+
+    Ok(BlobStorage {
+      source: path,
+    })
   }
 
   pub fn read_all(&self, hash: &BlobHash) -> Result<Vec<u8>, c_int> {
