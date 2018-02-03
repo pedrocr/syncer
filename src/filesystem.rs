@@ -261,17 +261,17 @@ impl<'a> FS<'a> {
   fn modify_path_optional_handle<F,T>(&self, path: &Path, fh: Option<u64>, closure: &F) -> Result<T, c_int>
     where F : Fn(&mut FSEntry) -> T {
     match fh {
-      Some(fh) => self.modify_handle(fh, closure),
+      Some(fh) => self.modify_handle(fh, false, closure),
       None => self.modify_path(path, closure),
     }
   }
 
   fn modify_path<F,T>(&self, path: &Path, closure: &F) -> Result<T, c_int>
     where F : Fn(&mut FSEntry) -> T {
-    self.modify_node(try!(self.find_node(path)), closure)
+    self.modify_node(try!(self.find_node(path)), false, closure)
   }
 
-  fn modify_handle<F,T>(&self, handle: u64, closure: &F) -> Result<T, c_int>
+  fn modify_handle<F,T>(&self, handle: u64, cache: bool, closure: &F) -> Result<T, c_int>
     where F : Fn(&mut FSEntry) -> T {
     let node = {
       let handles = self.handles.read().unwrap();
@@ -280,33 +280,18 @@ impl<'a> FS<'a> {
         None => return Err(libc::EBADF),
       }
     };
-    self.modify_node(node, closure)
+    self.modify_node(node, cache, closure)
   }
 
-  fn modify_handle_lazy<F,T>(&self, handle: u64, closure: &F) -> Result<T, c_int>
-    where F : Fn(&mut FSEntry) -> T {
-    let node = {
-      let handles = self.handles.read().unwrap();
-      match handles.get(&handle) {
-        Some(h) => h.node,
-        None => return Err(libc::EBADF),
-      }
-    };
-    self.modify_node_lazy(node, closure)
-  }
-
-  fn modify_node<F,T>(&self, node: u64, closure: &F) -> Result<T, c_int>
-    where F : Fn(&mut FSEntry) -> T {
-    let res = try!(self.modify_node_lazy(node, closure));
-    try!(self.backing.sync());
-    Ok(res)
-  }
-
-  fn modify_node_lazy<F,T>(&self, node: u64, closure: &F) -> Result<T, c_int>
+  fn modify_node<F,T>(&self, node: u64, cache: bool, closure: &F) -> Result<T, c_int>
     where F : Fn(&mut FSEntry) -> T {
     let mut entry = try!(self.backing.get_node(node));
     let res = closure(&mut entry);
-    try!(self.backing.save_node(node, entry));
+    if cache {
+      try!(self.backing.save_node_cached(node, entry));
+    } else {
+      try!(self.backing.save_node(node, entry));
+    }
     Ok(res)
   }
 
@@ -337,8 +322,9 @@ impl<'a> FS<'a> {
 
   fn delete_handle(&self, handle: u64) -> Result<(), c_int> {
     let mut handles = self.handles.write().unwrap();
-    handles.remove(&handle);
-    try!(self.backing.sync());
+    if let Some(handle) = handles.remove(&handle) {
+      try!(self.backing.sync_node(handle.node));
+    }
     Ok(())
   }
 }
@@ -410,7 +396,7 @@ impl<'a> FilesystemMT for FS<'a> {
     };
     let newnode = try!(self.backing.create_node(entry));
     created_entry.fh = self.create_handle(Handle{node: newnode, _flags: flags,});
-    try!(self.modify_node(node, &(|parent| parent.add_child(name, (newnode, FileTypeDef::RegularFile)))));
+    try!(self.modify_node(node, false, &(|parent| parent.add_child(name, (newnode, FileTypeDef::RegularFile)))));
     Ok(created_entry)
   }
 
@@ -425,7 +411,7 @@ impl<'a> FilesystemMT for FS<'a> {
     })));
     let created_dir = (entry.ctime, entry.attrs());
     let newnode = try!(self.backing.create_node(entry));
-    try!(self.modify_node(node, &(|parent| parent.add_child(name, (newnode, FileTypeDef::Directory)))));
+    try!(self.modify_node(node, false, &(|parent| parent.add_child(name, (newnode, FileTypeDef::Directory)))));
     Ok(created_dir)
   }
 
@@ -446,7 +432,7 @@ impl<'a> FilesystemMT for FS<'a> {
     })));
     let created_symlink = (entry.ctime, entry.attrs());
     let newnode = try!(self.backing.create_node(entry));
-    try!(self.modify_node(node, &(|parent| parent.add_child(name, (newnode, FileTypeDef::Symlink)))));
+    try!(self.modify_node(node, false, &(|parent| parent.add_child(name, (newnode, FileTypeDef::Symlink)))));
     Ok(created_symlink)
   }
 
@@ -456,7 +442,7 @@ impl<'a> FilesystemMT for FS<'a> {
     let childnodeinfo = try!(self.with_node(childnode, &(|entry| {
       ((entry.ctime, entry.attrs()), entry.filetype)
     })));
-    try!(self.modify_node(dirnode, &(|parent| parent.add_child(newname, (childnode, childnodeinfo.1)))));
+    try!(self.modify_node(dirnode, false, &(|parent| parent.add_child(newname, (childnode, childnodeinfo.1)))));
     Ok(childnodeinfo.0)
   }
 
@@ -467,7 +453,7 @@ impl<'a> FilesystemMT for FS<'a> {
   }
 
   fn write(&self, _req: RequestInfo, _path: &Path, fh: u64, offset: u64, data: Vec<u8>, _flags: u32) -> ResultWrite {
-    try!(self.modify_handle_lazy(fh, &(|entry| entry.write(&self.backing, offset, &data))))
+    try!(self.modify_handle(fh, true, &(|entry| entry.write(&self.backing, offset, &data))))
   }
 
   fn read(&self, _req: RequestInfo, _path: &Path, fh: u64, offset: u64, size: u32) -> ResultData {

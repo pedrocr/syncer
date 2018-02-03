@@ -1,6 +1,4 @@
 Rework the disk sync setup:
-  - For the operations that currently just sync don't go through the cache at all, just write
-  - For the write path don't force a sync of all files on release() just the node being released
   - For the block write path add a cache that only gets written to disk on sync(). This will make sure that we don't write blocks to disk that are fully orphaned by being rewritten immediately (easy to trigger with small writes to a file). To do this do something like:
     - Keep a block cache that new blocks get written to, and read from it in the read path (similar to the entry one right now)
     - On sync(node) write to disk only the blocks that are mentioned in the node

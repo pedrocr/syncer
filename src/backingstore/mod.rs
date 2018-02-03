@@ -61,6 +61,13 @@ impl BackingStore {
   }
 
   pub fn save_node(&self, node: u64, entry: FSEntry) -> Result<(), c_int> {
+    let encoded: Vec<u8> = serialize(&entry, Infinite).unwrap();
+    let hash = try!(self.blobs.add_blob(&encoded));
+    try!(self.nodes.set(node, &hash));
+    Ok(())
+  }
+
+  pub fn save_node_cached(&self, node: u64, entry: FSEntry) -> Result<(), c_int> {
     let mut nodes = self.node_cache.write().unwrap();
     nodes.insert(node, entry);
     Ok(())
@@ -87,12 +94,18 @@ impl BackingStore {
     self.blobs.write(hash, offset, data)
   }
 
-  pub fn sync(&self) -> Result<(), c_int> {
+  pub fn sync_node(&self, node: u64) -> Result<(), c_int> {
+    let mut nodes = self.node_cache.write().unwrap();
+    if let Some(entry) = nodes.remove(&node) {
+      try!(self.save_node(node, entry));
+    }
+    Ok(())
+  }
+
+  pub fn sync_all(&self) -> Result<(), c_int> {
     let mut nodes = self.node_cache.write().unwrap();
     for (node, entry) in nodes.drain() {
-      let encoded: Vec<u8> = serialize(&entry, Infinite).unwrap();
-      let hash = try!(self.blobs.add_blob(&encoded));
-      try!(self.nodes.set(node, &hash));
+      try!(self.save_node(node, entry));
     }
     Ok(())
   }

@@ -41,7 +41,7 @@ pub fn run(source: &str, mount: &str) -> Result<(), Error> {
       let dur = time::Duration::from_millis(60000);
       loop {
         match rx.recv_timeout(dur) {
-          Err(mpsc::RecvTimeoutError::Timeout) => bsref.sync().unwrap(),
+          Err(mpsc::RecvTimeoutError::Timeout) => bsref.sync_all().unwrap(),
           _ => break,
         }
       }
