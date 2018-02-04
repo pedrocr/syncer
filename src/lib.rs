@@ -44,6 +44,7 @@ pub fn run(source: &str, server: &str, mount: &str) -> Result<(), Error> {
           Err(mpsc::RecvTimeoutError::Timeout) => {
             bsref.sync_all().unwrap();
             bsref.do_uploads();
+            bsref.do_removals();
           },
           _ => break,
         }

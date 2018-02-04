@@ -123,6 +123,27 @@ impl MetadataDB {
     }
     deq
   }
+
+  pub fn to_delete(&self) -> Vec<(BlobHash, u64)> {
+    let conn = self.connection.lock().unwrap();
+    let mut stmt = conn.prepare("SELECT hash, size FROM blobs WHERE synced = 1 ORDER BY last_use ASC").unwrap();
+    let hash_iter = stmt.query_map(&[], |row| {
+      let hash: String = row.get(0);
+      let size: i64 = row.get(1);
+      assert!(hash.len() == HASHSIZE*2);
+      let mut hasharray = [0; HASHSIZE];
+      let vals = hex::decode(hash).unwrap();
+      for i in 0..HASHSIZE {
+        hasharray[i] = vals[i];
+      }
+      (hasharray, size as u64)
+    }).unwrap();
+    let mut vec = Vec::new();
+    for hash in hash_iter {
+      vec.push(hash.unwrap());
+    }
+    vec
+  }
 }
 
 #[cfg(test)]
@@ -188,5 +209,21 @@ mod tests {
     db.mark_synced_blob(&from_hash2);
     let to_upload: Vec<BlobHash> = db.to_upload().into();
     assert_eq!(vec![from_hash1, from_hash3], to_upload);
+  }
+
+#[test]
+  fn to_delete() {
+    let conn = Connection::open_in_memory().unwrap();
+    let db = MetadataDB::new(conn);
+    let from_hash1 = [1;HASHSIZE];
+    let from_hash2 = [2;HASHSIZE];
+    let from_hash3 = [3;HASHSIZE];
+    db.set_blob(&from_hash1, 10).unwrap();
+    db.set_blob(&from_hash2, 20).unwrap();
+    db.set_blob(&from_hash3, 30).unwrap();
+    db.mark_synced_blob(&from_hash2);
+    db.mark_synced_blob(&from_hash3);
+    let to_delete = db.to_delete();
+    assert_eq!(vec![(from_hash2, 20), (from_hash3, 30)], to_delete);
   }
 }

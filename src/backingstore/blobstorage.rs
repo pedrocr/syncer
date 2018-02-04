@@ -115,6 +115,8 @@ impl Blob {
 }
 
 pub struct BlobStorage {
+  maxbytes: u64,
+  localbytes: RwLock<u64>,
   source: PathBuf,
   server: String,
   metadata: MetadataDB,
@@ -138,6 +140,8 @@ impl BlobStorage {
     let to_upload = meta.to_upload();
 
     Ok(BlobStorage {
+      maxbytes: 0,
+      localbytes: RwLock::new(0),
       source: path,
       server: server.to_string(),
       metadata: meta,
@@ -172,6 +176,8 @@ impl BlobStorage {
     try!(self.metadata.set_blob(&blob.hash, blob.data.len() as u64));
     let mut new_blobs = self.new_blobs.write().unwrap();
     new_blobs.push_back(blob.hash);
+    let mut bytes = self.localbytes.write().unwrap();
+    *bytes += blob.data.len() as u64;
     Ok(())
   }
 
@@ -247,5 +253,31 @@ impl BlobStorage {
         Err(_) => {},
       }
     }
+  }
+
+  pub fn do_removals(&self) {
+    let bytes_to_delete = {
+      let localbytes = self.localbytes.read().unwrap();
+      if *localbytes > self.maxbytes { *localbytes - self.maxbytes } else { return; }
+    };
+
+    let mut deleted_bytes = 0;
+    while deleted_bytes < bytes_to_delete {
+      let hashes_to_delete = self.metadata.to_delete();
+      if hashes_to_delete.len() == 0 {
+        eprintln!("There's nothing else to delete even though I still need to reclaim space!");
+        break;
+      }
+      for (hash, size) in hashes_to_delete {
+        let path = Blob::get_path(&self.source, &hash);
+        match fs::remove_file(&path) {
+          Ok(_) => deleted_bytes += size,
+          Err(_) => eprintln!("Couldn't delete {:?}", path),
+        };
+      }
+    }
+
+    let mut localbytes = self.localbytes.write().unwrap();
+    *localbytes -= deleted_bytes;
   }
 }

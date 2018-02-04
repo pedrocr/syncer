@@ -97,4 +97,8 @@ impl BackingStore {
   pub fn do_uploads(&self) {
     self.blobs.do_uploads();
   }
+
+  pub fn do_removals(&self) {
+    self.blobs.do_removals();
+  }
 }
