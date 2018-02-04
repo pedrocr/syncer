@@ -115,10 +115,11 @@ impl BlobStorage {
     let connection = Connection::open(&file).unwrap();
     let meta = MetadataDB::new(connection);
     let to_upload = meta.to_upload();
+    let localbytes = meta.localbytes();
 
     Ok(BlobStorage {
       maxbytes: 0,
-      localbytes: RwLock::new(0),
+      localbytes: RwLock::new(localbytes),
       source: path,
       server: server.to_string(),
       metadata: meta,

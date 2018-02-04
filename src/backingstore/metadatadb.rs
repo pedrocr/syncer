@@ -155,6 +155,14 @@ impl MetadataDB {
     }
     vec
   }
+
+  pub fn localbytes(&self) -> u64 {
+    let conn = self.connection.lock().unwrap();
+    let bytes: i64 = conn.query_row(
+      "SELECT COALESCE(SUM(size), 0) FROM blobs WHERE present=1",
+      &[], |row| row.get(0)).unwrap();
+    bytes as u64
+  }
 }
 
 #[cfg(test)]
@@ -222,7 +230,7 @@ mod tests {
     assert_eq!(vec![from_hash1, from_hash3], to_upload);
   }
 
-#[test]
+  #[test]
   fn to_delete() {
     let conn = Connection::open_in_memory().unwrap();
     let db = MetadataDB::new(conn);
@@ -242,5 +250,21 @@ mod tests {
     assert_eq!(vec![(from_hash3, 30), (from_hash4, 40)], db.to_delete());
     db.mark_deleted_blob(&from_hash2, false);
     assert_eq!(vec![(from_hash2, 20), (from_hash3, 30), (from_hash4, 40)], db.to_delete());
+  }
+
+  #[test]
+  fn localbytes() {
+    let conn = Connection::open_in_memory().unwrap();
+    let db = MetadataDB::new(conn);
+    assert_eq!(0, db.localbytes());
+    let from_hash1 = [1;HASHSIZE];
+    let from_hash2 = [2;HASHSIZE];
+    db.set_blob(&from_hash1, 10).unwrap();
+    db.set_blob(&from_hash2, 20).unwrap();
+    assert_eq!(30, db.localbytes());
+    db.mark_deleted_blob(&from_hash2, true);
+    assert_eq!(10, db.localbytes());
+    db.mark_deleted_blob(&from_hash2, false);
+    assert_eq!(30, db.localbytes());
   }
 }
