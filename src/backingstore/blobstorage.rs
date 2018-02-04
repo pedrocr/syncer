@@ -9,7 +9,7 @@ use self::blake2::Blake2b;
 use self::blake2::digest::{Input, VariableOutput};
 use self::libc::c_int;
 use std::cmp;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::fs;
 use std::io::prelude::*;
 use std::usize;
@@ -39,29 +39,7 @@ impl Blob {
     }
   }
 
-  fn get_path(path: &PathBuf, hash: &BlobHash) -> PathBuf {
-    // As far as I can tell from online references there's no penalty in ext4 for
-    // random lookup in a directory with lots of files. So just store all the hashed
-    // files in a straight directory with no fanout to not waste space with directory
-    // entries. Just doing a 12bit fanout (4096 directories) wastes 17MB on ext4.
-    let mut path = path.clone();
-    path.push(hex::encode(hash));
-    path
-  }
-
-  fn get_remote_path(server: &str, hash: &BlobHash) -> String {
-    let mut remote = server.to_string();
-    remote.push_str(&"/");
-    remote.push_str(&hex::encode(hash));
-    remote
-  }
-
-  fn load(path: &PathBuf, server: &str, hash: &BlobHash) -> Result<Self, c_int> {
-    let file = Self::get_path(path, hash);
-    if !file.exists() {
-      try!(BlobStorage::fetch_from_server(path, server, hash));
-    }
-
+  fn load(file: &Path) -> Result<Self, c_int> {
     let mut file = match fs::File::open(&file) {
       Ok(f) => f,
       Err(_) => return Err(libc::EIO),
@@ -74,10 +52,9 @@ impl Blob {
     Ok(Self::new_with_data(buffer))
   }
 
-  fn store(&self, path: &PathBuf) -> Result<(), c_int> {
-    let path = Self::get_path(path, &self.hash);
-    if !path.exists() {
-      let mut file = match fs::File::create(&path) {
+  fn store(&self, file: &Path) -> Result<(), c_int> {
+    if !file.exists() {
+      let mut file = match fs::File::create(&file) {
         Ok(f) => f,
         Err(_) => return Err(libc::EIO),
       };
@@ -149,6 +126,23 @@ impl BlobStorage {
     })
   }
 
+  fn local_path(&self, hash: &BlobHash) -> PathBuf {
+    // As far as I can tell from online references there's no penalty in ext4 for
+    // random lookup in a directory with lots of files. So just store all the hashed
+    // files in a straight directory with no fanout to not waste space with directory
+    // entries. Just doing a 12bit fanout (4096 directories) wastes 17MB on ext4.
+    let mut path = self.source.clone();
+    path.push(hex::encode(hash));
+    path
+  }
+
+  fn remote_path(&self, hash: &BlobHash) -> String {
+    let mut remote = self.server.clone();
+    remote.push_str(&"/");
+    remote.push_str(&hex::encode(hash));
+    remote
+  }
+
   pub fn read_all(&self, hash: &BlobHash) -> Result<Vec<u8>, c_int> {
     self.read(hash, 0, usize::MAX)
   }
@@ -168,11 +162,21 @@ impl BlobStorage {
 
   fn get_blob(&self, hash: &BlobHash) -> Result<Blob, c_int> {
     self.metadata.touch_blob(hash);
-    Blob::load(&self.source, &self.server, hash)
+    let file = self.local_path(hash);
+    if !file.exists() {
+      try!(self.fetch_from_server(hash));
+      let blob = try!(Blob::load(&file));
+      let mut localbytes = self.localbytes.write().unwrap();
+      *localbytes += blob.data.len() as u64;
+      Ok(blob)
+    } else {
+      Blob::load(&file)
+    }
   }
 
   fn store_blob(&self, blob: Blob) -> Result<(), c_int> {
-    try!(blob.store(&self.source));
+    let file = self.local_path(&blob.hash);
+    try!(blob.store(&file));
     try!(self.metadata.set_blob(&blob.hash, blob.data.len() as u64));
     let mut new_blobs = self.new_blobs.write().unwrap();
     new_blobs.push_back(blob.hash);
@@ -202,13 +206,13 @@ impl BlobStorage {
     self.read_all(&try!(self.metadata.get_node(node)))
   }
 
-  fn upload_to_server(path: &PathBuf, server: &str, hash: &BlobHash) -> Result<(), c_int> {
-    let path = Blob::get_path(path, hash);
+  fn upload_to_server(&self, hash: &BlobHash) -> Result<(), c_int> {
+    let path = self.local_path(hash);
     if !path.exists() {
       return Err(libc::EIO);
     }
     for _ in 0..10 {
-      match Command::new("rsync").arg("--timeout=5").arg(&path).arg(server).status() {
+      match Command::new("rsync").arg("--timeout=5").arg(&path).arg(&self.server).status() {
         Ok(_) => return Ok(()),
         Err(_) => {},
       }
@@ -217,10 +221,10 @@ impl BlobStorage {
     Err(libc::EIO)
   }
 
-  fn fetch_from_server(path: &PathBuf, server: &str, hash: &BlobHash) -> Result<(), c_int> {
-    let remote = Blob::get_remote_path(server, hash);
+  fn fetch_from_server(&self, hash: &BlobHash) -> Result<(), c_int> {
+    let remote = self.remote_path(hash);
     for _ in 0..10 {
-      match Command::new("rsync").arg("--timeout=5").arg(&remote).arg(&path).status() {
+      match Command::new("rsync").arg("--timeout=5").arg(&remote).arg(&self.source).status() {
         Ok(_) => return Ok(()),
         Err(_) => {},
       }
@@ -239,7 +243,7 @@ impl BlobStorage {
         let new_blobs = self.new_blobs.read().unwrap();
         new_blobs.front().unwrap().clone()
       };
-      match Self::upload_to_server(&self.source, &self.server, &hash) {
+      match self.upload_to_server(&hash) {
         Ok(_) => {
           // sync worked so this hash is no longer needed
           { 
@@ -269,7 +273,7 @@ impl BlobStorage {
         break;
       }
       for (hash, size) in hashes_to_delete {
-        let path = Blob::get_path(&self.source, &hash);
+        let path = self.local_path(&hash);
         match fs::remove_file(&path) {
           Ok(_) => deleted_bytes += size,
           Err(_) => eprintln!("Couldn't delete {:?}", path),
