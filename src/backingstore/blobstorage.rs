@@ -168,6 +168,7 @@ impl BlobStorage {
       let blob = try!(Blob::load(&file));
       let mut localbytes = self.localbytes.write().unwrap();
       *localbytes += blob.data.len() as u64;
+      self.metadata.mark_deleted_blob(&hash, false);
       Ok(blob)
     } else {
       Blob::load(&file)
@@ -275,7 +276,10 @@ impl BlobStorage {
       for (hash, size) in hashes_to_delete {
         let path = self.local_path(&hash);
         match fs::remove_file(&path) {
-          Ok(_) => deleted_bytes += size,
+          Ok(_) => {
+            deleted_bytes += size;
+            self.metadata.mark_deleted_blob(&hash, true);
+          },
           Err(_) => eprintln!("Couldn't delete {:?}", path),
         };
       }

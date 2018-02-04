@@ -28,6 +28,7 @@ impl MetadataDB {
     connection.execute("CREATE TABLE IF NOT EXISTS blobs (
       hash            TEXT PRIMARY KEY,
       synced          INTEGER NOT NULL,
+      present         INTEGER NOT NULL,
       size            INTEGER NOT NULL,
       last_use        INTEGER NOT NULL
     )", &[]).unwrap();
@@ -77,7 +78,7 @@ impl MetadataDB {
     let conn = self.connection.lock().unwrap();
     let time = timeval();
     match conn.execute(
-      "INSERT OR REPLACE INTO blobs (hash, size, last_use, synced) VALUES (?1, ?2, ?3,
+      "INSERT OR REPLACE INTO blobs (hash, size, last_use, present, synced) VALUES (?1, ?2, ?3, 1,
          COALESCE((SELECT synced FROM blobs WHERE hash = ?1), 0))",
       &[&(hex::encode(hash)), &(size as i64), &time]) {
       Ok(_) => Ok(()),
@@ -99,6 +100,16 @@ impl MetadataDB {
     let conn = self.connection.lock().unwrap();
     match conn.execute("UPDATE OR IGNORE blobs SET synced = 1 WHERE hash = ?1",
                  &[&(hex::encode(hash))]) {
+      Ok(_) => {},
+      Err(e) => {println!("error is {:?}", e);},
+    };
+  }
+
+  pub fn mark_deleted_blob(&self, hash: &BlobHash, deleted: bool) {
+    let conn = self.connection.lock().unwrap();
+    let present: i64 = if deleted { 0 } else { 1 };
+    match conn.execute("UPDATE OR IGNORE blobs SET present = ?2 WHERE hash = ?1",
+                 &[&(hex::encode(hash)), &present]) {
       Ok(_) => {},
       Err(e) => {println!("error is {:?}", e);},
     };
@@ -126,7 +137,7 @@ impl MetadataDB {
 
   pub fn to_delete(&self) -> Vec<(BlobHash, u64)> {
     let conn = self.connection.lock().unwrap();
-    let mut stmt = conn.prepare("SELECT hash, size FROM blobs WHERE synced = 1 ORDER BY last_use ASC").unwrap();
+    let mut stmt = conn.prepare("SELECT hash, size FROM blobs WHERE synced = 1 and present = 1 ORDER BY last_use ASC").unwrap();
     let hash_iter = stmt.query_map(&[], |row| {
       let hash: String = row.get(0);
       let size: i64 = row.get(1);
@@ -218,12 +229,18 @@ mod tests {
     let from_hash1 = [1;HASHSIZE];
     let from_hash2 = [2;HASHSIZE];
     let from_hash3 = [3;HASHSIZE];
+    let from_hash4 = [4;HASHSIZE];
     db.set_blob(&from_hash1, 10).unwrap();
     db.set_blob(&from_hash2, 20).unwrap();
     db.set_blob(&from_hash3, 30).unwrap();
+    db.set_blob(&from_hash4, 40).unwrap();
     db.mark_synced_blob(&from_hash2);
     db.mark_synced_blob(&from_hash3);
-    let to_delete = db.to_delete();
-    assert_eq!(vec![(from_hash2, 20), (from_hash3, 30)], to_delete);
+    db.mark_synced_blob(&from_hash4);
+    assert_eq!(vec![(from_hash2, 20), (from_hash3, 30), (from_hash4, 40)], db.to_delete());
+    db.mark_deleted_blob(&from_hash2, true);
+    assert_eq!(vec![(from_hash3, 30), (from_hash4, 40)], db.to_delete());
+    db.mark_deleted_blob(&from_hash2, false);
+    assert_eq!(vec![(from_hash2, 20), (from_hash3, 30), (from_hash4, 40)], db.to_delete());
   }
 }
