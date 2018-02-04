@@ -19,6 +19,16 @@ pub struct MetadataDB {
 }
 
 impl MetadataDB {
+  fn hash_from_string(hash: String) -> BlobHash {
+    assert!(hash.len() == HASHSIZE*2);
+    let mut hasharray = [0; HASHSIZE];
+    let vals = hex::decode(hash).unwrap();
+    for i in 0..HASHSIZE {
+      hasharray[i] = vals[i];
+    }
+    hasharray
+  }
+
   pub fn new(connection: Connection) -> Self {
     connection.execute("CREATE TABLE IF NOT EXISTS nodes (
       id              INTEGER PRIMARY KEY,
@@ -45,13 +55,7 @@ impl MetadataDB {
       Ok(hash) => hash,
       Err(_) => return Err(libc::EIO),
     };
-    assert!(hash.len() == HASHSIZE*2);
-    let mut hasharray = [0; HASHSIZE];
-    let vals = hex::decode(hash).unwrap();
-    for i in 0..HASHSIZE {
-      hasharray[i] = vals[i];
-    }
-    Ok(hasharray)
+    Ok(Self::hash_from_string(hash))
   }
 
   pub fn set_node(&self, node: u64, hash: &BlobHash) -> Result<(), c_int> {
@@ -119,14 +123,7 @@ impl MetadataDB {
     let conn = self.connection.lock().unwrap();
     let mut stmt = conn.prepare("SELECT hash FROM blobs WHERE synced = 0 ORDER BY last_use ASC").unwrap();
     let hash_iter = stmt.query_map(&[], |row| {
-      let hash: String = row.get(0);
-      assert!(hash.len() == HASHSIZE*2);
-      let mut hasharray = [0; HASHSIZE];
-      let vals = hex::decode(hash).unwrap();
-      for i in 0..HASHSIZE {
-        hasharray[i] = vals[i];
-      }
-      hasharray
+      Self::hash_from_string(row.get(0))
     }).unwrap();
     let mut deq = VecDeque::new();
     for hash in hash_iter {
@@ -139,14 +136,8 @@ impl MetadataDB {
     let conn = self.connection.lock().unwrap();
     let mut stmt = conn.prepare("SELECT hash, size FROM blobs WHERE synced = 1 and present = 1 ORDER BY last_use ASC").unwrap();
     let hash_iter = stmt.query_map(&[], |row| {
-      let hash: String = row.get(0);
+      let hasharray = Self::hash_from_string(row.get(0));
       let size: i64 = row.get(1);
-      assert!(hash.len() == HASHSIZE*2);
-      let mut hasharray = [0; HASHSIZE];
-      let vals = hex::decode(hash).unwrap();
-      for i in 0..HASHSIZE {
-        hasharray[i] = vals[i];
-      }
       (hasharray, size as u64)
     }).unwrap();
     let mut vec = Vec::new();
