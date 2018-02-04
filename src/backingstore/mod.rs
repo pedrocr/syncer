@@ -20,9 +20,9 @@ pub struct BackingStore {
 }
 
 impl BackingStore {
-  pub fn new(path: &str) -> Result<Self, c_int> {
+  pub fn new(path: &str, server: &str) -> Result<Self, c_int> {
     Ok(Self {
-      blobs: try!(BlobStorage::new(path)),
+      blobs: try!(BlobStorage::new(path, server)),
       node_counter: Mutex::new(0),
       node_cache: RwLock::new(HashMap::new()),
     })

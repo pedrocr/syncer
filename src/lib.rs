@@ -22,8 +22,8 @@ fn fix_lifetime<'a>(t: FS<'a>) -> FS<'static> {
   unsafe { mem::transmute(t) }
 }
 
-pub fn run(source: &str, mount: &str) -> Result<(), Error> {
-  let bs = match BackingStore::new(source) {
+pub fn run(source: &str, server: &str, mount: &str) -> Result<(), Error> {
+  let bs = match BackingStore::new(source, server) {
     Ok(bs) => bs,
     Err(_) => return Err(Error::new(ErrorKind::Other, "Couldn't create the backing store")),
   };

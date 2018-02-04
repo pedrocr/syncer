@@ -1,20 +1,19 @@
 extern crate rusqlite;
 extern crate blake2;
-
-use std::cmp;
-use self::blake2::Blake2b;
-use self::blake2::digest::{Input, VariableOutput};
 extern crate hex;
 extern crate libc;
+
+use super::metadatadb::*;
+use self::rusqlite::Connection;
+use self::blake2::Blake2b;
+use self::blake2::digest::{Input, VariableOutput};
 use self::libc::c_int;
+use std::cmp;
 use std::path::PathBuf;
 use std::fs;
 use std::io::prelude::*;
 use std::usize;
-use super::metadatadb::*;
-
-
-use self::rusqlite::Connection;
+use std::process::Command;
 
 pub const HASHSIZE: usize = 20;
 pub type BlobHash = [u8;HASHSIZE];
@@ -48,22 +47,29 @@ impl Blob {
     path
   }
 
-  fn load(path: &PathBuf, hash: &BlobHash) -> Result<Self, c_int> {
-    let path = Self::get_path(path, hash);
-    if !path.exists() {
-      Err(libc::EIO)
-    } else {
-      let mut file = match fs::File::open(&path) {
-        Ok(f) => f,
-        Err(_) => return Err(libc::EIO),
-      };
-      let mut buffer = Vec::new();
-      match file.read_to_end(&mut buffer) {
-        Ok(_) => {},
-        Err(_) => return Err(libc::EIO),
-      }
-      Ok(Self::new_with_data(buffer))
+  fn get_remote_path(server: &str, hash: &BlobHash) -> String {
+    let mut remote = server.to_string();
+    remote.push_str(&"/");
+    remote.push_str(&hex::encode(hash));
+    remote
+  }
+
+  fn load(path: &PathBuf, server: &str, hash: &BlobHash) -> Result<Self, c_int> {
+    let file = Self::get_path(path, hash);
+    if !file.exists() {
+      try!(Self::sync_from(path, server, hash));
     }
+
+    let mut file = match fs::File::open(&file) {
+      Ok(f) => f,
+      Err(_) => return Err(libc::EIO),
+    };
+    let mut buffer = Vec::new();
+    match file.read_to_end(&mut buffer) {
+      Ok(_) => {},
+      Err(_) => return Err(libc::EIO),
+    }
+    Ok(Self::new_with_data(buffer))
   }
 
   fn store(&self, path: &PathBuf) -> Result<(), c_int> {
@@ -79,6 +85,31 @@ impl Blob {
       }
     }
     Ok(())
+  }
+
+  fn sync_from(path: &PathBuf, server: &str, hash: &BlobHash) -> Result<(), c_int> {
+    let remote = Self::get_remote_path(server, hash);
+    for _ in 0..10 {
+      match Command::new("rsync").arg("--timeout=5").arg(&remote).arg(&path).status() {
+        Ok(_) => return Ok(()),
+        Err(_) => {},
+      }
+    }
+    Err(libc::EIO)
+  }
+
+  fn sync_to(&self, path: &PathBuf, server: &str) -> Result<(), c_int> {
+    let path = Self::get_path(path, &self.hash);
+    if !path.exists() {
+      return Err(libc::EIO);
+    }
+    for _ in 0..10 {
+      match Command::new("rsync").arg("--timeout=5").arg(&path).arg(&server).status() {
+        Ok(_) => return Ok(()),
+        Err(_) => {},
+      }
+    }
+    Err(libc::EIO)
   }
 
   fn read(&self, offset: usize, bytes: usize) -> Vec<u8> {
@@ -108,11 +139,12 @@ impl Blob {
 
 pub struct BlobStorage {
   source: PathBuf,
+  server: String,
   metadata: MetadataDB,
 }
 
 impl BlobStorage {
-  pub fn new(source: &str) -> Result<Self, c_int> {
+  pub fn new(source: &str, server: &str) -> Result<Self, c_int> {
     let mut path = PathBuf::from(source);
     path.push("blobs");
     match fs::create_dir_all(&path) {
@@ -127,6 +159,7 @@ impl BlobStorage {
 
     Ok(BlobStorage {
       source: path,
+      server: server.to_string(),
       metadata: MetadataDB::new(connection),
     })
   }
@@ -150,12 +183,14 @@ impl BlobStorage {
 
   fn get_blob(&self, hash: &BlobHash) -> Result<Blob, c_int> {
     self.metadata.touch_blob(hash);
-    Blob::load(&self.source, hash)
+    Blob::load(&self.source, &self.server, hash)
   }
 
   fn store_blob(&self, blob: Blob) -> Result<(), c_int> {
     try!(blob.store(&self.source));
     try!(self.metadata.set_blob(&blob.hash, blob.data.len() as u64));
+    try!(blob.sync_to(&self.source, &self.server));
+    self.metadata.mark_synced_blob(&blob.hash);
     Ok(())
   }
 
