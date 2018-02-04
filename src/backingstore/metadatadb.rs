@@ -2,10 +2,12 @@ extern crate rusqlite;
 extern crate libc;
 extern crate hex;
 extern crate time;
-use self::rusqlite::Connection;
-use std::sync::Mutex;
-use self::libc::c_int;
+
 use super::blobstorage::*;
+use self::rusqlite::Connection;
+use self::libc::c_int;
+use std::sync::Mutex;
+use std::collections::VecDeque;
 
 fn timeval() -> i64 {
   let time = time::get_time();
@@ -101,6 +103,26 @@ impl MetadataDB {
       Err(e) => {println!("error is {:?}", e);},
     };
   }
+
+  pub fn to_upload(&self) -> VecDeque<BlobHash> {
+    let conn = self.connection.lock().unwrap();
+    let mut stmt = conn.prepare("SELECT hash FROM blobs WHERE synced = 0 ORDER BY last_use ASC").unwrap();
+    let hash_iter = stmt.query_map(&[], |row| {
+      let hash: String = row.get(0);
+      assert!(hash.len() == HASHSIZE*2);
+      let mut hasharray = [0; HASHSIZE];
+      let vals = hex::decode(hash).unwrap();
+      for i in 0..HASHSIZE {
+        hasharray[i] = vals[i];
+      }
+      hasharray
+    }).unwrap();
+    let mut deq = VecDeque::new();
+    for hash in hash_iter {
+      deq.push_back(hash.unwrap());
+    }
+    deq
+  }
 }
 
 #[cfg(test)]
@@ -151,5 +173,20 @@ mod tests {
     let (synced, _, new_last_used) = db.get_blob(&from_hash).unwrap();
     assert!(new_last_used > last_used);
     assert_eq!(true, synced);
+  }
+
+  #[test]
+  fn to_upload() {
+    let conn = Connection::open_in_memory().unwrap();
+    let db = MetadataDB::new(conn);
+    let from_hash1 = [1;HASHSIZE];
+    let from_hash2 = [2;HASHSIZE];
+    let from_hash3 = [3;HASHSIZE];
+    db.set_blob(&from_hash1, 0).unwrap();
+    db.set_blob(&from_hash2, 0).unwrap();
+    db.set_blob(&from_hash3, 0).unwrap();
+    db.mark_synced_blob(&from_hash2);
+    let to_upload: Vec<BlobHash> = db.to_upload().into();
+    assert_eq!(vec![from_hash1, from_hash3], to_upload);
   }
 }

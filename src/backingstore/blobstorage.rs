@@ -134,12 +134,14 @@ impl BlobStorage {
     let mut file = PathBuf::from(source);
     file.push("metadata.sqlite3");
     let connection = Connection::open(&file).unwrap();
+    let meta = MetadataDB::new(connection);
+    let to_upload = meta.to_upload();
 
     Ok(BlobStorage {
       source: path,
       server: server.to_string(),
-      metadata: MetadataDB::new(connection),
-      new_blobs: RwLock::new(VecDeque::new()),
+      metadata: meta,
+      new_blobs: RwLock::new(to_upload),
     })
   }
 
