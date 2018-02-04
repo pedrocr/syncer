@@ -30,6 +30,8 @@ impl MetadataDB {
   }
 
   pub fn new(connection: Connection) -> Self {
+    connection.execute("PRAGMA journal_mode=WAL", &[]).ok();
+
     connection.execute("CREATE TABLE IF NOT EXISTS nodes (
       id              INTEGER PRIMARY KEY,
       hash            TEXT NOT NULL
