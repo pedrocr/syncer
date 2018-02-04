@@ -37,11 +37,14 @@ pub fn run(source: &str, server: &str, mount: &str) -> Result<(), Error> {
 
   crossbeam::scope(|scope| {
     let synchandle = scope.spawn(move || {
-      // Sync the backing store to disk every 60 seconds
-      let dur = time::Duration::from_millis(60000);
+      // Sync the backing store to disk/remote every so often
+      let dur = time::Duration::from_secs(10);
       loop {
         match rx.recv_timeout(dur) {
-          Err(mpsc::RecvTimeoutError::Timeout) => bsref.sync_all().unwrap(),
+          Err(mpsc::RecvTimeoutError::Timeout) => {
+            bsref.sync_all().unwrap();
+            bsref.do_uploads();
+          },
           _ => break,
         }
       }

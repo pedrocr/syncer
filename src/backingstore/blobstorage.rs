@@ -14,6 +14,8 @@ use std::fs;
 use std::io::prelude::*;
 use std::usize;
 use std::process::Command;
+use std::collections::VecDeque;
+use std::sync::RwLock;
 
 pub const HASHSIZE: usize = 20;
 pub type BlobHash = [u8;HASHSIZE];
@@ -57,7 +59,7 @@ impl Blob {
   fn load(path: &PathBuf, server: &str, hash: &BlobHash) -> Result<Self, c_int> {
     let file = Self::get_path(path, hash);
     if !file.exists() {
-      try!(Self::sync_from(path, server, hash));
+      try!(BlobStorage::fetch_from_server(path, server, hash));
     }
 
     let mut file = match fs::File::open(&file) {
@@ -85,31 +87,6 @@ impl Blob {
       }
     }
     Ok(())
-  }
-
-  fn sync_from(path: &PathBuf, server: &str, hash: &BlobHash) -> Result<(), c_int> {
-    let remote = Self::get_remote_path(server, hash);
-    for _ in 0..10 {
-      match Command::new("rsync").arg("--timeout=5").arg(&remote).arg(&path).status() {
-        Ok(_) => return Ok(()),
-        Err(_) => {},
-      }
-    }
-    Err(libc::EIO)
-  }
-
-  fn sync_to(&self, path: &PathBuf, server: &str) -> Result<(), c_int> {
-    let path = Self::get_path(path, &self.hash);
-    if !path.exists() {
-      return Err(libc::EIO);
-    }
-    for _ in 0..10 {
-      match Command::new("rsync").arg("--timeout=5").arg(&path).arg(&server).status() {
-        Ok(_) => return Ok(()),
-        Err(_) => {},
-      }
-    }
-    Err(libc::EIO)
   }
 
   fn read(&self, offset: usize, bytes: usize) -> Vec<u8> {
@@ -141,6 +118,7 @@ pub struct BlobStorage {
   source: PathBuf,
   server: String,
   metadata: MetadataDB,
+  new_blobs: RwLock<VecDeque<BlobHash>>,
 }
 
 impl BlobStorage {
@@ -161,6 +139,7 @@ impl BlobStorage {
       source: path,
       server: server.to_string(),
       metadata: MetadataDB::new(connection),
+      new_blobs: RwLock::new(VecDeque::new()),
     })
   }
 
@@ -189,8 +168,8 @@ impl BlobStorage {
   fn store_blob(&self, blob: Blob) -> Result<(), c_int> {
     try!(blob.store(&self.source));
     try!(self.metadata.set_blob(&blob.hash, blob.data.len() as u64));
-    try!(blob.sync_to(&self.source, &self.server));
-    self.metadata.mark_synced_blob(&blob.hash);
+    let mut new_blobs = self.new_blobs.write().unwrap();
+    new_blobs.push_back(blob.hash);
     Ok(())
   }
 
@@ -213,5 +192,58 @@ impl BlobStorage {
 
   pub fn read_node(&self, node: u64) -> Result<Vec<u8>, c_int> {
     self.read_all(&try!(self.metadata.get_node(node)))
+  }
+
+  fn upload_to_server(path: &PathBuf, server: &str, hash: &BlobHash) -> Result<(), c_int> {
+    let path = Blob::get_path(path, hash);
+    if !path.exists() {
+      return Err(libc::EIO);
+    }
+    for _ in 0..10 {
+      match Command::new("rsync").arg("--timeout=5").arg(&path).arg(server).status() {
+        Ok(_) => return Ok(()),
+        Err(_) => {},
+      }
+    }
+    eprintln!("Failed to upload block to server");
+    Err(libc::EIO)
+  }
+
+  fn fetch_from_server(path: &PathBuf, server: &str, hash: &BlobHash) -> Result<(), c_int> {
+    let remote = Blob::get_remote_path(server, hash);
+    for _ in 0..10 {
+      match Command::new("rsync").arg("--timeout=5").arg(&remote).arg(&path).status() {
+        Ok(_) => return Ok(()),
+        Err(_) => {},
+      }
+    }
+    eprintln!("Failed to get block from server");
+    Err(libc::EIO)
+  }
+
+  pub fn do_uploads(&self) {
+    let count = {
+      let new_blobs = self.new_blobs.read().unwrap();
+      new_blobs.len()
+    };
+    for _ in 0..count {
+      let hash = {
+        let new_blobs = self.new_blobs.read().unwrap();
+        new_blobs.front().unwrap().clone()
+      };
+      match Self::upload_to_server(&self.source, &self.server, &hash) {
+        Ok(_) => {
+          // sync worked so this hash is no longer needed
+          { 
+            // get the hash out of the list in a block to hold the lock for as short as possible
+            let mut new_blobs = self.new_blobs.write().unwrap();
+            new_blobs.pop_front();
+          }
+          // Mark the block as already synced
+          self.metadata.mark_synced_blob(&hash);
+        },
+        Err(_) => {},
+      }
+    }
   }
 }

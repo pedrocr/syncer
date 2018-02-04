@@ -93,4 +93,8 @@ impl BackingStore {
     }
     Ok(())
   }
+
+  pub fn do_uploads(&self) {
+    self.blobs.do_uploads();
+  }
 }
