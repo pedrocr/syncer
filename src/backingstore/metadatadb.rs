@@ -62,7 +62,7 @@ impl MetadataDB {
     }
   }
 
-  pub fn get_blob(&self, hash: &BlobHash) -> Result<(bool, u64, i64), c_int> {
+  #[allow(dead_code)] pub fn get_blob(&self, hash: &BlobHash) -> Result<(bool, u64, i64), c_int> {
     let conn = self.connection.lock().unwrap();
     let vals: (i64, i64, i64) = match conn.query_row(
       "SELECT synced, size, last_use FROM blobs WHERE hash=?1",
