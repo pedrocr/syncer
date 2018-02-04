@@ -1,42 +1,28 @@
 extern crate bincode;
 extern crate libc;
-extern crate rusqlite;
 
 mod blobstorage;
 mod metadatadb;
 
 use self::blobstorage::*;
-use self::metadatadb::*;
 pub use self::blobstorage::BlobHash;
 use super::filesystem::FSEntry;
 
 use self::bincode::{serialize, deserialize, Infinite};
 use self::libc::c_int;
-use self::rusqlite::Connection;
 use std::sync::{Mutex, RwLock};
 use std::collections::HashMap;
-use std::path::PathBuf;
 
 pub struct BackingStore {
   blobs: BlobStorage,
-  nodes: MetadataDB,
   node_counter: Mutex<u64>,
   node_cache: RwLock<HashMap<u64, FSEntry>>,
 }
 
 impl BackingStore {
   pub fn new(path: &str) -> Result<Self, c_int> {
-    // This makes sure that the path exists to next be used to create the DB
-    let bs = try!(BlobStorage::new(path));
-
-    // Create the db file to pass to MetadataDB
-    let mut file = PathBuf::from(path);
-    file.push("metadata.sqlite3");
-    let connection = Connection::open(&file).unwrap();
-
     Ok(Self {
-      blobs: bs,
-      nodes: MetadataDB::new(connection),
+      blobs: try!(BlobStorage::new(path)),
       node_counter: Mutex::new(0),
       node_cache: RwLock::new(HashMap::new()),
     })
@@ -62,8 +48,7 @@ impl BackingStore {
 
   pub fn save_node(&self, node: u64, entry: FSEntry) -> Result<(), c_int> {
     let encoded: Vec<u8> = serialize(&entry, Infinite).unwrap();
-    let hash = try!(self.blobs.add_blob(&encoded));
-    try!(self.nodes.set(node, &hash));
+    try!(self.blobs.add_node(node, &encoded));
     Ok(())
   }
 
@@ -79,8 +64,7 @@ impl BackingStore {
       Some(n) => Ok((*n).clone()),
       None => {
         // We're in the slow path where we actually need to fetch stuff from disk
-        let hash = try!(self.nodes.get(node));
-        let buffer = try!(self.blobs.read_all(&hash));
+        let buffer = try!(self.blobs.read_node(node));
         Ok(deserialize(&buffer[..]).unwrap())
       },
     }

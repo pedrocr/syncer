@@ -1,5 +1,7 @@
-use std::cmp;
+extern crate rusqlite;
 extern crate blake2;
+
+use std::cmp;
 use self::blake2::Blake2b;
 use self::blake2::digest::{Input, VariableOutput};
 extern crate hex;
@@ -9,6 +11,10 @@ use std::path::PathBuf;
 use std::fs;
 use std::io::prelude::*;
 use std::usize;
+use super::metadatadb::*;
+
+
+use self::rusqlite::Connection;
 
 pub const HASHSIZE: usize = 20;
 pub type BlobHash = [u8;HASHSIZE];
@@ -102,6 +108,7 @@ impl Blob {
 
 pub struct BlobStorage {
   source: PathBuf,
+  metadata: MetadataDB,
 }
 
 impl BlobStorage {
@@ -113,8 +120,14 @@ impl BlobStorage {
       Err(_) => return Err(libc::EIO),
     }
 
+    // Create the db file to pass to MetadataDB
+    let mut file = PathBuf::from(source);
+    file.push("metadata.sqlite3");
+    let connection = Connection::open(&file).unwrap();
+
     Ok(BlobStorage {
       source: path,
+      metadata: MetadataDB::new(connection),
     })
   }
 
@@ -136,11 +149,14 @@ impl BlobStorage {
   }
 
   fn get_blob(&self, hash: &BlobHash) -> Result<Blob, c_int> {
+    self.metadata.touch_blob(hash);
     Blob::load(&self.source, hash)
   }
 
   fn store_blob(&self, blob: Blob) -> Result<(), c_int> {
-    blob.store(&self.source)
+    try!(blob.store(&self.source));
+    try!(self.metadata.set_blob(&blob.hash, blob.data.len() as u64));
+    Ok(())
   }
 
   pub fn zero(size: usize) -> BlobHash {
@@ -152,5 +168,15 @@ impl BlobStorage {
     let hash = blob.hash;
     try!(self.store_blob(blob));
     Ok(hash)
+  }
+
+  pub fn add_node(&self, node: u64, data: &[u8]) -> Result<BlobHash, c_int> {
+    let hash = try!(self.add_blob(data));
+    try!(self.metadata.set_node(node, &hash));
+    Ok(hash)
+  }
+
+  pub fn read_node(&self, node: u64) -> Result<Vec<u8>, c_int> {
+    self.read_all(&try!(self.metadata.get_node(node)))
   }
 }
