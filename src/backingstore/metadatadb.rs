@@ -130,14 +130,18 @@ impl MetadataDB {
     tran.commit().unwrap();
   }
 
-  pub fn mark_deleted_blob(&self, hash: &BlobHash, deleted: bool) {
-    let conn = self.connection.lock().unwrap();
+  pub fn mark_deleted_blobs(&self, vals: &[BlobHash], deleted: bool) {
+    let mut conn = self.connection.lock().unwrap();
+    let tran = conn.transaction().unwrap();
     let present: i64 = if deleted { 0 } else { 1 };
-    match conn.execute("UPDATE OR IGNORE blobs SET present = ?2 WHERE hash = ?1",
-                 &[&(hex::encode(hash)), &present]) {
-      Ok(_) => {},
-      Err(e) => {println!("error is {:?}", e);},
-    };
+    for hash in vals {
+      match tran.execute("UPDATE OR IGNORE blobs SET present = ?2 WHERE hash = ?1",
+                   &[&(hex::encode(hash)), &present]) {
+        Ok(_) => {},
+        Err(e) => {println!("error is {:?}", e);},
+      };
+    }
+    tran.commit().unwrap();
   }
 
   pub fn to_upload(&self) -> VecDeque<BlobHash> {
@@ -259,9 +263,9 @@ mod tests {
     db.mark_synced_blob(&from_hash3);
     db.mark_synced_blob(&from_hash4);
     assert_eq!(vec![(from_hash2, 20), (from_hash3, 30), (from_hash4, 40)], db.to_delete());
-    db.mark_deleted_blob(&from_hash2, true);
+    db.mark_deleted_blobs(&[from_hash2], true);
     assert_eq!(vec![(from_hash3, 30), (from_hash4, 40)], db.to_delete());
-    db.mark_deleted_blob(&from_hash2, false);
+    db.mark_deleted_blobs(&[from_hash2], false);
     assert_eq!(vec![(from_hash2, 20), (from_hash3, 30), (from_hash4, 40)], db.to_delete());
   }
 
@@ -275,9 +279,9 @@ mod tests {
     db.set_blob(&from_hash1, 10).unwrap();
     db.set_blob(&from_hash2, 20).unwrap();
     assert_eq!(30, db.localbytes());
-    db.mark_deleted_blob(&from_hash2, true);
+    db.mark_deleted_blobs(&[from_hash2], true);
     assert_eq!(10, db.localbytes());
-    db.mark_deleted_blob(&from_hash2, false);
+    db.mark_deleted_blobs(&[from_hash2], false);
     assert_eq!(30, db.localbytes());
   }
 }

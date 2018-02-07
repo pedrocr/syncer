@@ -169,7 +169,8 @@ impl BlobStorage {
     if !file.exists() {
       try!(self.fetch_from_server(hash, readahead));
       let blob = try!(Blob::load(&file));
-      self.metadata.mark_deleted_blob(&hash, false);
+      self.metadata.mark_deleted_blobs(&[hash.clone()], false);
+      self.metadata.mark_deleted_blobs(&readahead, false);
       Ok(blob)
     } else {
       Blob::load(&file)
@@ -291,18 +292,24 @@ impl BlobStorage {
         eprintln!("WARNING: Nothing to delete but reclaim needed ({} bytes)", bytes_to_delete - deleted_bytes);
         break;
       }
+      let mut deleted = Vec::new();
       for (hash, size) in hashes_to_delete {
         let path = self.local_path(&hash);
         match fs::remove_file(&path) {
           Ok(_) => {
             deleted_bytes += size;
-            self.metadata.mark_deleted_blob(&hash, true);
+            deleted.push(hash);
             if deleted_bytes >= bytes_to_delete {
-              return
+              break
             }
           },
           Err(_) => eprintln!("Couldn't delete {:?}", path),
         };
+      }
+      self.metadata.mark_deleted_blobs(&deleted, true);
+
+      if deleted_bytes >= bytes_to_delete {
+        break
       }
     }
   }
