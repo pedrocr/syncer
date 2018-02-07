@@ -111,13 +111,23 @@ impl MetadataDB {
     tran.commit().unwrap();
   }
 
-  pub fn mark_synced_blob(&self, hash: &BlobHash) {
-    let conn = self.connection.lock().unwrap();
-    match conn.execute("UPDATE OR IGNORE blobs SET synced = 1 WHERE hash = ?1",
-                 &[&(hex::encode(hash))]) {
-      Ok(_) => {},
-      Err(e) => {println!("error is {:?}", e);},
-    };
+  #[allow(dead_code)] pub fn mark_synced_blob(&self, hash: &BlobHash) {
+    let mut vals = vec![hash.clone()];
+    self.mark_synced_blobs(vals.drain(..));
+  }
+
+  pub fn mark_synced_blobs<I>(&self, vals: I)
+    where I: Iterator<Item = BlobHash> {
+    let mut conn = self.connection.lock().unwrap();
+    let tran = conn.transaction().unwrap();
+    for hash in vals {
+      match tran.execute("UPDATE OR IGNORE blobs SET synced = 1 WHERE hash = ?1",
+                   &[&(hex::encode(hash))]) {
+        Ok(_) => {},
+        Err(e) => {println!("error is {:?}", e);},
+      };
+    }
+    tran.commit().unwrap();
   }
 
   pub fn mark_deleted_blob(&self, hash: &BlobHash, deleted: bool) {

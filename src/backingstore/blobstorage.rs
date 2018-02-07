@@ -245,6 +245,7 @@ impl BlobStorage {
       let new_blobs = self.new_blobs.read().unwrap();
       new_blobs.len()
     };
+    let mut synced = Vec::new();
     for _ in 0..count {
       let hash = {
         let new_blobs = self.new_blobs.read().unwrap();
@@ -259,11 +260,12 @@ impl BlobStorage {
             new_blobs.pop_front();
           }
           // Mark the block as already synced
-          self.metadata.mark_synced_blob(&hash);
+          synced.push(hash);
         },
         Err(_) => {},
       }
     }
+    self.metadata.mark_synced_blobs(synced.drain(..));
   }
 
   pub fn do_removals(&self) {
