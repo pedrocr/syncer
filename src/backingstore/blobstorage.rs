@@ -208,9 +208,7 @@ impl BlobStorage {
 
   fn upload_to_server(&self, hashes: &[BlobHash]) -> Result<(), c_int> {
     for _ in 0..10 {
-      let mut cmd = Command::new("rsync");
-      cmd.arg("--quiet");
-      cmd.arg("--timeout=5");
+      let mut cmd = self.connect_to_server();
       for hash in hashes {
         let path = self.local_path(hash);
         if !path.exists() {
@@ -232,13 +230,25 @@ impl BlobStorage {
   fn fetch_from_server(&self, hash: &BlobHash) -> Result<(), c_int> {
     let remote = self.remote_path(hash);
     for _ in 0..10 {
-      match Command::new("rsync").arg("--timeout=5").arg(&remote).arg(&self.source).status() {
+      let mut cmd = self.connect_to_server();
+      cmd.arg(&remote);
+      cmd.arg(&self.source);
+      match cmd.status() {
         Ok(_) => return Ok(()),
         Err(_) => {},
       }
     }
     eprintln!("Failed to get block from server");
     Err(libc::EIO)
+  }
+
+  fn connect_to_server(&self) -> Command {
+    let mut cmd = Command::new("rsync");
+    cmd.arg("--quiet");
+    cmd.arg("--timeout=5");
+    cmd.arg("--inplace");
+    cmd.arg("--whole-file");
+    cmd
   }
 
   pub fn do_uploads(&self) {
