@@ -30,7 +30,12 @@ impl MetadataDB {
   }
 
   pub fn new(connection: Connection) -> Self {
+    // Make the database faster at the cost of losing data but without causing corruption
+    // https://www.sqlite.org/pragma.html#pragma_synchronous
+    // If durability is not a concern, then synchronous=NORMAL is normally all one needs
+    // in WAL mode.
     connection.execute("PRAGMA journal_mode=WAL", &[]).ok();
+    connection.execute("PRAGMA synchronous=NORMAL", &[]).ok();
 
     connection.execute("CREATE TABLE IF NOT EXISTS nodes (
       id              INTEGER PRIMARY KEY,
