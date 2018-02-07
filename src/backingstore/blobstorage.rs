@@ -93,7 +93,6 @@ impl Blob {
 
 pub struct BlobStorage {
   maxbytes: u64,
-  localbytes: RwLock<u64>,
   source: PathBuf,
   server: String,
   metadata: MetadataDB,
@@ -116,11 +115,9 @@ impl BlobStorage {
     let connection = Connection::open(&file).unwrap();
     let meta = MetadataDB::new(connection);
     let to_upload = meta.to_upload();
-    let localbytes = meta.localbytes();
 
     Ok(BlobStorage {
       maxbytes: 0,
-      localbytes: RwLock::new(localbytes),
       source: path,
       server: server.to_string(),
       metadata: meta,
@@ -172,8 +169,6 @@ impl BlobStorage {
     if !file.exists() {
       try!(self.fetch_from_server(hash));
       let blob = try!(Blob::load(&file));
-      let mut localbytes = self.localbytes.write().unwrap();
-      *localbytes += blob.data.len() as u64;
       self.metadata.mark_deleted_blob(&hash, false);
       Ok(blob)
     } else {
@@ -187,8 +182,6 @@ impl BlobStorage {
     try!(self.metadata.set_blob(&blob.hash, blob.data.len() as u64));
     let mut new_blobs = self.new_blobs.write().unwrap();
     new_blobs.push_back(blob.hash);
-    let mut bytes = self.localbytes.write().unwrap();
-    *bytes += blob.data.len() as u64;
     Ok(())
   }
 
@@ -274,15 +267,15 @@ impl BlobStorage {
     }
 
     let bytes_to_delete = {
-      let localbytes = self.localbytes.read().unwrap();
-      if *localbytes > self.maxbytes { *localbytes - self.maxbytes } else { return; }
+      let localbytes = self.metadata.localbytes();
+      if localbytes > self.maxbytes { localbytes - self.maxbytes } else { return; }
     };
 
     let mut deleted_bytes = 0;
     while deleted_bytes < bytes_to_delete {
       let hashes_to_delete = self.metadata.to_delete();
       if hashes_to_delete.len() == 0 {
-        eprintln!("There's nothing else to delete even though I still need to reclaim space!");
+        eprintln!("WARNING: Nothing to delete but reclaim needed ({} bytes)", bytes_to_delete);
         break;
       }
       for (hash, size) in hashes_to_delete {
@@ -296,8 +289,5 @@ impl BlobStorage {
         };
       }
     }
-
-    let mut localbytes = self.localbytes.write().unwrap();
-    *localbytes -= deleted_bytes;
   }
 }
