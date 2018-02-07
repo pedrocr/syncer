@@ -9,7 +9,7 @@ use self::libc::c_int;
 use std::sync::Mutex;
 use std::collections::VecDeque;
 
-fn timeval() -> i64 {
+pub fn timeval() -> i64 {
   let time = time::get_time();
   time.sec * 1000 + (time.nsec as i64)/1000000
 }
@@ -97,14 +97,18 @@ impl MetadataDB {
     }
   }
 
-  pub fn touch_blob(&self, hash: &BlobHash) {
-    let conn = self.connection.lock().unwrap();
-    let time = timeval();
-    match conn.execute("UPDATE OR IGNORE blobs SET last_use = ?2 WHERE hash = ?1",
-                 &[&(hex::encode(hash)), &time]) {
-      Ok(_) => {},
-      Err(e) => {println!("error is {:?}", e);},
-    };
+  pub fn touch_blobs<I>(&self, vals: I)
+    where I: Iterator<Item = (BlobHash, i64)> {
+    let mut conn = self.connection.lock().unwrap();
+    let tran = conn.transaction().unwrap();
+    for (hash, time) in vals {
+      match tran.execute("UPDATE OR IGNORE blobs SET last_use = ?2 WHERE hash = ?1",
+                   &[&(hex::encode(hash)), &time]) {
+        Ok(_) => {},
+        Err(e) => {println!("error is {:?}", e);},
+      };
+    }
+    tran.commit().unwrap();
   }
 
   pub fn mark_synced_blob(&self, hash: &BlobHash) {
@@ -191,7 +195,8 @@ mod tests {
     assert_eq!(false, synced);
     assert!(from_time >= last_used);
     std::thread::sleep(std::time::Duration::from_millis(10));
-    db.touch_blob(&from_hash);
+    let mut vals = vec![(from_hash, timeval())];
+    db.touch_blobs(vals.drain(..));
     db.mark_synced_blob(&from_hash);
     let (synced, _, new_last_used) = db.get_blob(&from_hash).unwrap();
     assert!(new_last_used > last_used);

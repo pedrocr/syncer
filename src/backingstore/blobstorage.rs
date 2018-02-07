@@ -14,7 +14,7 @@ use std::fs;
 use std::io::prelude::*;
 use std::usize;
 use std::process::Command;
-use std::collections::VecDeque;
+use std::collections::{VecDeque,HashMap};
 use std::sync::RwLock;
 
 pub const HASHSIZE: usize = 20;
@@ -98,6 +98,7 @@ pub struct BlobStorage {
   server: String,
   metadata: MetadataDB,
   new_blobs: RwLock<VecDeque<BlobHash>>,
+  touched_blobs: RwLock<HashMap<BlobHash,i64>>,
 }
 
 impl BlobStorage {
@@ -124,6 +125,7 @@ impl BlobStorage {
       server: server.to_string(),
       metadata: meta,
       new_blobs: RwLock::new(to_upload),
+      touched_blobs: RwLock::new(HashMap::new()),
     })
   }
 
@@ -162,7 +164,10 @@ impl BlobStorage {
   }
 
   fn get_blob(&self, hash: &BlobHash) -> Result<Blob, c_int> {
-    self.metadata.touch_blob(hash);
+    {
+      let mut touched = self.touched_blobs.write().unwrap();
+      touched.insert(hash.clone(), timeval());
+    }
     let file = self.local_path(hash);
     if !file.exists() {
       try!(self.fetch_from_server(hash));
@@ -262,6 +267,11 @@ impl BlobStorage {
   }
 
   pub fn do_removals(&self) {
+    {
+      let mut touched = self.touched_blobs.write().unwrap();
+      self.metadata.touch_blobs(touched.drain());
+    }
+
     let bytes_to_delete = {
       let localbytes = self.localbytes.read().unwrap();
       if *localbytes > self.maxbytes { *localbytes - self.maxbytes } else { return; }
