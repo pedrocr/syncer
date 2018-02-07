@@ -74,8 +74,8 @@ impl BackingStore {
     self.blobs.read(hash, offset, bytes, readahead)
   }
 
-  pub fn write(&self, hash: &BlobHash, offset: usize, data: &[u8]) -> Result<BlobHash, c_int> {
-    self.blobs.write(hash, offset, data)
+  pub fn write(&self, hash: &BlobHash, offset: usize, data: &[u8], readahead: &[BlobHash]) -> Result<BlobHash, c_int> {
+    self.blobs.write(hash, offset, data, readahead)
   }
 
   pub fn sync_node(&self, node: u64) -> Result<(), c_int> {

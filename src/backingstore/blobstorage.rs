@@ -152,8 +152,8 @@ impl BlobStorage {
     Ok(blob.read(offset, bytes))
   }
 
-  pub fn write(&self, hash: &BlobHash, offset: usize, data: &[u8]) -> Result<BlobHash, c_int> {
-    let blob = try!(self.get_blob(hash, &[]));
+  pub fn write(&self, hash: &BlobHash, offset: usize, data: &[u8], readahead: &[BlobHash]) -> Result<BlobHash, c_int> {
+    let blob = try!(self.get_blob(hash, readahead));
     let new_blob = blob.write(offset, data);
     let hash = new_blob.hash;
     try!(self.store_blob(new_blob));

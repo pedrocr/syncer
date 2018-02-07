@@ -150,15 +150,19 @@ impl FSEntry {
     let mut written = 0;
     let startblock = start/BLKSIZE;
     let endblock = (end + BLKSIZE - 1)/BLKSIZE;
-    for (i,block) in self.blocks[startblock..endblock].iter_mut().enumerate() {
-      let i = i+startblock;
-      let bstart = cmp::max(start, i*BLKSIZE);
-      let bend = cmp::min(end, (i+1)*BLKSIZE);
-      let bsize = bend - bstart;
-      let boffset = bstart - i*BLKSIZE;
-      let newblock = try!(bs.write(block, boffset, &data[written..written+bsize]));
-      block.copy_from_slice(&newblock);
-      written += bsize;
+    for i in startblock..endblock {
+      let newblock = {
+        let block = &self.blocks[i];
+        let readahead = &self.blocks[i+1..cmp::min(i+READAHEAD, self.blocks.len())];
+        let bstart = cmp::max(start, i*BLKSIZE);
+        let bend = cmp::min(end, (i+1)*BLKSIZE);
+        let bsize = bend - bstart;
+        let boffset = bstart - i*BLKSIZE;
+        let nb = try!(bs.write(block, boffset, &data[written..written+bsize], readahead));
+        written += bsize;
+        nb
+      };
+      self.blocks[i].copy_from_slice(&newblock);
     }
     assert!(written == data.len());
     self.mtime = self::time::get_time();
