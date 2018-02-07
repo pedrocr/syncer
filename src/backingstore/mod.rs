@@ -70,8 +70,8 @@ impl BackingStore {
     }
   }
 
-  pub fn read(&self, hash: &BlobHash, offset: usize, bytes: usize) -> Result<Vec<u8>, c_int> {
-    self.blobs.read(hash, offset, bytes)
+  pub fn read(&self, hash: &BlobHash, offset: usize, bytes: usize, readahead: &[BlobHash]) -> Result<Vec<u8>, c_int> {
+    self.blobs.read(hash, offset, bytes, readahead)
   }
 
   pub fn write(&self, hash: &BlobHash, offset: usize, data: &[u8]) -> Result<BlobHash, c_int> {

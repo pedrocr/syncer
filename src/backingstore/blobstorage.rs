@@ -144,30 +144,30 @@ impl BlobStorage {
   }
 
   pub fn read_all(&self, hash: &BlobHash) -> Result<Vec<u8>, c_int> {
-    self.read(hash, 0, usize::MAX)
+    self.read(hash, 0, usize::MAX, &[])
   }
 
-  pub fn read(&self, hash: &BlobHash, offset: usize, bytes: usize) -> Result<Vec<u8>, c_int> {
-    let blob = try!(self.get_blob(hash));
+  pub fn read(&self, hash: &BlobHash, offset: usize, bytes: usize, readahead: &[BlobHash]) -> Result<Vec<u8>, c_int> {
+    let blob = try!(self.get_blob(hash, readahead));
     Ok(blob.read(offset, bytes))
   }
 
   pub fn write(&self, hash: &BlobHash, offset: usize, data: &[u8]) -> Result<BlobHash, c_int> {
-    let blob = try!(self.get_blob(hash));
+    let blob = try!(self.get_blob(hash, &[]));
     let new_blob = blob.write(offset, data);
     let hash = new_blob.hash;
     try!(self.store_blob(new_blob));
     Ok(hash)
   }
 
-  fn get_blob(&self, hash: &BlobHash) -> Result<Blob, c_int> {
+  fn get_blob(&self, hash: &BlobHash, readahead: &[BlobHash]) -> Result<Blob, c_int> {
     {
       let mut touched = self.touched_blobs.write().unwrap();
       touched.insert(hash.clone(), timeval());
     }
     let file = self.local_path(hash);
     if !file.exists() {
-      try!(self.fetch_from_server(hash));
+      try!(self.fetch_from_server(hash, readahead));
       let blob = try!(Blob::load(&file));
       self.metadata.mark_deleted_blob(&hash, false);
       Ok(blob)
@@ -227,11 +227,14 @@ impl BlobStorage {
     Err(libc::EIO)
   }
 
-  fn fetch_from_server(&self, hash: &BlobHash) -> Result<(), c_int> {
+  fn fetch_from_server(&self, hash: &BlobHash, readahead: &[BlobHash]) -> Result<(), c_int> {
     let remote = self.remote_path(hash);
     for _ in 0..10 {
       let mut cmd = self.connect_to_server();
       cmd.arg(&remote);
+      for hash in readahead {
+        cmd.arg(&self.remote_path(hash));
+      }
       cmd.arg(&self.source);
       match cmd.status() {
         Ok(_) => return Ok(()),
@@ -256,7 +259,7 @@ impl BlobStorage {
       let (mut hashes, empty) = {
         let mut new_blobs = self.new_blobs.write().unwrap();
         let len = new_blobs.len();
-        let vals: Vec<BlobHash> = new_blobs.drain(..cmp::min(1000, len)).collect();
+        let vals: Vec<BlobHash> = new_blobs.drain(..cmp::min(800, len)).collect();
         (vals, new_blobs.len() == 0)
       };
       if self.upload_to_server(&hashes).is_ok() {
