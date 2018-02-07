@@ -117,7 +117,7 @@ impl BlobStorage {
     let to_upload = meta.to_upload();
 
     Ok(BlobStorage {
-      maxbytes: 0,
+      maxbytes: 10000000,
       source: path,
       server: server.to_string(),
       metadata: meta,
@@ -272,10 +272,10 @@ impl BlobStorage {
     };
 
     let mut deleted_bytes = 0;
-    while deleted_bytes < bytes_to_delete {
+    loop {
       let hashes_to_delete = self.metadata.to_delete();
       if hashes_to_delete.len() == 0 {
-        eprintln!("WARNING: Nothing to delete but reclaim needed ({} bytes)", bytes_to_delete);
+        eprintln!("WARNING: Nothing to delete but reclaim needed ({} bytes)", bytes_to_delete - deleted_bytes);
         break;
       }
       for (hash, size) in hashes_to_delete {
@@ -284,6 +284,9 @@ impl BlobStorage {
           Ok(_) => {
             deleted_bytes += size;
             self.metadata.mark_deleted_blob(&hash, true);
+            if deleted_bytes >= bytes_to_delete {
+              return
+            }
           },
           Err(_) => eprintln!("Couldn't delete {:?}", path),
         };

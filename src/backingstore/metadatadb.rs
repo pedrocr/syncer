@@ -155,7 +155,7 @@ impl MetadataDB {
 
   pub fn to_delete(&self) -> Vec<(BlobHash, u64)> {
     let conn = self.connection.lock().unwrap();
-    let mut stmt = conn.prepare("SELECT hash, size FROM blobs WHERE synced = 1 and present = 1 ORDER BY last_use ASC").unwrap();
+    let mut stmt = conn.prepare("SELECT hash, size FROM blobs WHERE synced = 1 and present = 1 ORDER BY last_use ASC LIMIT 1000").unwrap();
     let hash_iter = stmt.query_map(&[], |row| {
       let hasharray = Self::hash_from_string(row.get(0));
       let size: i64 = row.get(1);
