@@ -213,18 +213,26 @@ impl BlobStorage {
     self.read_all(&try!(self.metadata.get_node(node)))
   }
 
-  fn upload_to_server(&self, hash: &BlobHash) -> Result<(), c_int> {
-    let path = self.local_path(hash);
-    if !path.exists() {
-      return Err(libc::EIO);
-    }
+  fn upload_to_server(&self, hashes: &[BlobHash]) -> Result<(), c_int> {
     for _ in 0..10 {
-      match Command::new("rsync").arg("--timeout=5").arg(&path).arg(&self.server).status() {
+      let mut cmd = Command::new("rsync");
+      cmd.arg("--quiet");
+      cmd.arg("--timeout=5");
+      for hash in hashes {
+        let path = self.local_path(hash);
+        if !path.exists() {
+          eprintln!("ERROR: couldn't find file {:?} to upload!", path);
+        } else {
+          cmd.arg(&path);
+        }
+      }
+      cmd.arg(&self.server);
+      match cmd.status() {
         Ok(_) => return Ok(()),
         Err(_) => {},
       }
     }
-    eprintln!("Failed to upload block to server");
+    eprintln!("ERROR: Failed to upload blocks to server");
     Err(libc::EIO)
   }
 
@@ -241,31 +249,22 @@ impl BlobStorage {
   }
 
   pub fn do_uploads(&self) {
-    let count = {
-      let new_blobs = self.new_blobs.read().unwrap();
-      new_blobs.len()
-    };
-    let mut synced = Vec::new();
-    for _ in 0..count {
-      let hash = {
-        let new_blobs = self.new_blobs.read().unwrap();
-        new_blobs.front().unwrap().clone()
+    loop {
+      let (mut hashes, empty) = {
+        let mut new_blobs = self.new_blobs.write().unwrap();
+        let len = new_blobs.len();
+        let vals: Vec<BlobHash> = new_blobs.drain(..cmp::min(1000, len)).collect();
+        (vals, new_blobs.len() == 0)
       };
-      match self.upload_to_server(&hash) {
-        Ok(_) => {
-          // sync worked so this hash is no longer needed
-          { 
-            // get the hash out of the list in a block to hold the lock for as short as possible
-            let mut new_blobs = self.new_blobs.write().unwrap();
-            new_blobs.pop_front();
-          }
-          // Mark the block as already synced
-          synced.push(hash);
-        },
-        Err(_) => {},
+      if self.upload_to_server(&hashes).is_ok() {
+        self.metadata.mark_synced_blobs(hashes.drain(..));
+      } else {
+        // We couldn't sync, back to the queue
+        let mut new_blobs = self.new_blobs.write().unwrap();
+        new_blobs.extend(hashes.drain(..));
       }
+      if empty { break }
     }
-    self.metadata.mark_synced_blobs(synced.drain(..));
   }
 
   pub fn do_removals(&self) {
