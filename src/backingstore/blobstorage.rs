@@ -264,6 +264,7 @@ impl BlobStorage {
     loop {
       let mut hashes = self.metadata.to_upload();
       let empty = hashes.len() < 800;
+      if hashes.len() == 0 { break }
       if self.upload_to_server(&hashes).is_ok() {
         self.metadata.mark_synced_blobs(hashes.drain(..));
         if empty { break }
