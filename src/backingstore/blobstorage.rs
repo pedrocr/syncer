@@ -197,6 +197,10 @@ impl BlobStorage {
     Ok(hash)
   }
 
+  pub fn max_node(&self) -> Result<u64, c_int> {
+    self.metadata.max_node()
+  }
+
   pub fn add_node(&self, node: u64, data: &[u8]) -> Result<BlobHash, c_int> {
     let hash = try!(self.add_blob(data));
     try!(self.metadata.set_node(node, &hash));

@@ -21,9 +21,12 @@ pub struct BackingStore {
 
 impl BackingStore {
   pub fn new(path: &str, server: &str) -> Result<Self, c_int> {
+    let bs = try!(BlobStorage::new(path, server));
+    let nodecount = try!(bs.max_node()) + 1;
+
     Ok(Self {
-      blobs: try!(BlobStorage::new(path, server)),
-      node_counter: Mutex::new(0),
+      blobs: bs,
+      node_counter: Mutex::new(nodecount),
       node_cache: RwLock::new(HashMap::new()),
     })
   }

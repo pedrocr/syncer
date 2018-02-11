@@ -54,6 +54,16 @@ impl MetadataDB {
     }
   }
 
+  pub fn max_node(&self) -> Result<u64, c_int> {
+    let conn = self.connection.lock().unwrap();
+    let node: i64 = match conn.query_row("SELECT COALESCE(MAX(id), 0) FROM nodes",
+                                             &[], |row| row.get(0)) {
+      Ok(count) => count,
+      Err(_) => return Err(libc::EIO),
+    };
+    Ok(node as u64)
+  }
+
   pub fn get_node(&self, node: u64) -> Result<BlobHash, c_int> {
     let conn = self.connection.lock().unwrap();
     let hash: String = match conn.query_row("SELECT hash FROM nodes WHERE id=?1",
@@ -202,6 +212,16 @@ mod tests {
     db.set_node(0, &from_hash).unwrap();
     let hash = db.get_node(0).unwrap();
     assert_eq!(from_hash, hash);
+  }
+
+  #[test]
+  fn maxnode() {
+    let conn = Connection::open_in_memory().unwrap();
+    let db = MetadataDB::new(conn);
+    assert_eq!(0, db.max_node().unwrap());
+    let from_hash = [0;HASHSIZE];
+    db.set_node(5, &from_hash).unwrap();
+    assert_eq!(5, db.max_node().unwrap());
   }
 
   #[test]
