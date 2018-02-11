@@ -37,8 +37,9 @@ impl MetadataDB {
     connection.execute("PRAGMA synchronous=NORMAL", &[]).ok();
 
     connection.execute("CREATE TABLE IF NOT EXISTS nodes (
-      id              INTEGER PRIMARY KEY,
-      hash            TEXT NOT NULL
+      id              INTEGER NOT NULL,
+      hash            TEXT NOT NULL,
+      creation        INTEGER NOT NULL
     )", &[]).unwrap();
 
     connection.execute("CREATE TABLE IF NOT EXISTS blobs (
@@ -66,20 +67,21 @@ impl MetadataDB {
 
   pub fn get_node(&self, node: u64) -> Result<BlobHash, c_int> {
     let conn = self.connection.lock().unwrap();
-    let hash: String = match conn.query_row("SELECT hash FROM nodes WHERE id=?1",
+    let hash: String = match conn.query_row("SELECT hash FROM nodes WHERE id=?1 ORDER BY creation DESC LIMIT 1",
                                              &[&(node as i64)], |row| row.get(0)) {
       Ok(hash) => hash,
-      Err(_) => return Err(libc::EIO),
+      Err(e) => {println!("error is {:?}", e); return Err(libc::EIO)},
     };
     Ok(Self::hash_from_string(hash))
   }
 
   pub fn set_node(&self, node: u64, hash: &BlobHash) -> Result<(), c_int> {
+    let time = timeval();
     let conn = self.connection.lock().unwrap();
-    match conn.execute("INSERT OR REPLACE INTO nodes (id, hash) VALUES (?1, ?2)",
-                 &[&(node as i64), &(hex::encode(hash))]) {
+    match conn.execute("INSERT INTO nodes (id, hash, creation) VALUES (?1, ?2, ?3)",
+                 &[&(node as i64), &(hex::encode(hash)), &time]) {
       Ok(_) => Ok(()),
-      Err(_) => return Err(libc::EIO),
+      Err(e) => {println!("error is {:?}", e); return Err(libc::EIO)},
     }
   }
 
