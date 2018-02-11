@@ -101,7 +101,7 @@ pub struct BlobStorage {
 }
 
 impl BlobStorage {
-  pub fn new(source: &str, server: &str) -> Result<Self, c_int> {
+  pub fn new(source: &str, server: &str, maxbytes: u64) -> Result<Self, c_int> {
     let mut path = PathBuf::from(source);
     path.push("blobs");
     match fs::create_dir_all(&path) {
@@ -116,7 +116,7 @@ impl BlobStorage {
     let meta = MetadataDB::new(connection);
 
     Ok(BlobStorage {
-      maxbytes: 10000000,
+      maxbytes,
       source: path,
       server: server.to_string(),
       metadata: meta,

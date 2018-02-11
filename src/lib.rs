@@ -57,8 +57,8 @@ impl BackgroundThread {
   }
 }
 
-pub fn run(source: &str, server: &str, mount: &str) -> Result<(), Error> {
-  let bs = match BackingStore::new(source, server) {
+pub fn run(source: &str, server: &str, mount: &str, maxbytes: u64) -> Result<(), Error> {
+  let bs = match BackingStore::new(source, server, maxbytes) {
     Ok(bs) => bs,
     Err(_) => return Err(Error::new(ErrorKind::Other, "Couldn't create the backing store")),
   };
