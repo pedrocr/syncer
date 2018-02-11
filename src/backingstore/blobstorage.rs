@@ -14,7 +14,7 @@ use std::fs;
 use std::io::prelude::*;
 use std::usize;
 use std::process::Command;
-use std::collections::{VecDeque,HashMap};
+use std::collections::HashMap;
 use std::sync::RwLock;
 
 pub const HASHSIZE: usize = 20;
@@ -96,7 +96,6 @@ pub struct BlobStorage {
   source: PathBuf,
   server: String,
   metadata: MetadataDB,
-  new_blobs: RwLock<VecDeque<BlobHash>>,
   written_blobs: RwLock<Vec<(BlobHash, u64, i64)>>,
   touched_blobs: RwLock<HashMap<BlobHash,i64>>,
 }
@@ -115,14 +114,12 @@ impl BlobStorage {
     file.push("metadata.sqlite3");
     let connection = Connection::open(&file).unwrap();
     let meta = MetadataDB::new(connection);
-    let to_upload = meta.to_upload();
 
     Ok(BlobStorage {
       maxbytes: 10000000,
       source: path,
       server: server.to_string(),
       metadata: meta,
-      new_blobs: RwLock::new(to_upload),
       written_blobs: RwLock::new(Vec::new()),
       touched_blobs: RwLock::new(HashMap::new()),
     })
@@ -185,10 +182,6 @@ impl BlobStorage {
     {
       let mut written_blobs = self.written_blobs.write().unwrap();
       written_blobs.push((blob.hash, blob.data.len() as u64, timeval()));
-    }
-    {
-      let mut new_blobs = self.new_blobs.write().unwrap();
-      new_blobs.push_back(blob.hash);
     }
     Ok(())
   }
@@ -269,20 +262,12 @@ impl BlobStorage {
 
   pub fn do_uploads(&self) {
     loop {
-      let (mut hashes, empty) = {
-        let mut new_blobs = self.new_blobs.write().unwrap();
-        let len = new_blobs.len();
-        let vals: Vec<BlobHash> = new_blobs.drain(..cmp::min(800, len)).collect();
-        (vals, new_blobs.len() == 0)
-      };
+      let mut hashes = self.metadata.to_upload();
+      let empty = hashes.len() < 800;
       if self.upload_to_server(&hashes).is_ok() {
         self.metadata.mark_synced_blobs(hashes.drain(..));
-      } else {
-        // We couldn't sync, back to the queue
-        let mut new_blobs = self.new_blobs.write().unwrap();
-        new_blobs.extend(hashes.drain(..));
+        if empty { break }
       }
-      if empty { break }
     }
   }
 

@@ -7,7 +7,6 @@ use super::blobstorage::*;
 use self::rusqlite::Connection;
 use self::libc::c_int;
 use std::sync::Mutex;
-use std::collections::VecDeque;
 
 pub fn timeval() -> i64 {
   let time = time::get_time();
@@ -153,17 +152,17 @@ impl MetadataDB {
     tran.commit().unwrap();
   }
 
-  pub fn to_upload(&self) -> VecDeque<BlobHash> {
+  pub fn to_upload(&self) -> Vec<BlobHash> {
     let conn = self.connection.lock().unwrap();
     let mut stmt = conn.prepare("SELECT hash FROM blobs WHERE synced = 0 ORDER BY last_use ASC").unwrap();
     let hash_iter = stmt.query_map(&[], |row| {
       Self::hash_from_string(row.get(0))
     }).unwrap();
-    let mut deq = VecDeque::new();
+    let mut hashes = Vec::new();
     for hash in hash_iter {
-      deq.push_back(hash.unwrap());
+      hashes.push(hash.unwrap());
     }
-    deq
+    hashes
   }
 
   pub fn to_delete(&self) -> Vec<(BlobHash, u64)> {
