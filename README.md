@@ -2,6 +2,9 @@
 
 **WARNING: This is highly experimental and might eat your data. Make sure you have good backups before you test it.**
 
+[![Build Status](https://travis-ci.org/pedrocr/syncer.svg?branch=master)](https://travis-ci.org/pedrocr/syncer)
+[![Crates.io](https://img.shields.io/crates/v/syncer.svg)](https://crates.io/crates/syncer)
+
 This is a filesystem that allows you to keep a seamless local view of a very large repository of files while only really having a much smaller local cache. It's meant for situations where you have too small of a disk to hold the full collection but instead would like to fetch data from a remote server on demand. The use case it was built for was having a very large collection of media (e.g., a multi-terabyte photo collection) and wanting to be able to seamlessly access it at any time on a laptop that only has a few GBs of space.
 
 syncer is built as a FUSE filesystem so it presents a regular POSIX interface that any app should be able to use. Files are internally split into blocks and hashed. Those blocks get uploaded to any rsync end point you want (usually an SSH server). Then when the local storage exceeds the limited amount the least recently used blocks get evicted. They get brought back into local storage on demand by fetching them from the remote server again.
