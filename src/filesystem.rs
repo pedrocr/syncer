@@ -494,5 +494,18 @@ impl<'a> FilesystemMT for FS<'a> {
     try!(self.modify_path(newparent, &(|newparent| newparent.add_child(newname, node))));
     Ok(())
   }
+
+  fn statfs(&self, _req: RequestInfo, _path: &Path) -> ResultStatfs {
+    Ok(Statfs {
+      blocks: 1000000000,
+      bfree:  1000000000,
+      bavail: 1000000000,
+      files: 0,
+      ffree: 1000000000,
+      bsize: 4096,
+      namelen: 4096,
+      frsize: 4096,
+    })
+  }
 }
 
