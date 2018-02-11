@@ -17,6 +17,29 @@ pub struct MetadataDB {
   connection: Mutex<Connection>,
 }
 
+fn dberror_print(error: self::rusqlite::Error) {
+  eprintln!("WARNING: db error: \"{}\"", error);
+}
+
+macro_rules! dberror_test {
+  ( $e:expr ) => {
+    match $e {
+      Ok(_) => {},
+      Err(e) => dberror_print(e),
+    }
+  }
+}
+
+macro_rules! dberror_return {
+  ( $e:expr ) => {
+    match $e {
+      Ok(vals) => vals,
+      Err(e) => {dberror_print(e); return Err(libc::EIO)},
+    }
+  }
+}
+
+
 impl MetadataDB {
   fn hash_from_string(hash: String) -> BlobHash {
     assert!(hash.len() == HASHSIZE*2);
@@ -57,42 +80,31 @@ impl MetadataDB {
 
   pub fn max_node(&self) -> Result<u64, c_int> {
     let conn = self.connection.lock().unwrap();
-    let node: i64 = match conn.query_row("SELECT COALESCE(MAX(id), 0) FROM nodes",
-                                             &[], |row| row.get(0)) {
-      Ok(count) => count,
-      Err(_) => return Err(libc::EIO),
-    };
+    let node: i64 = dberror_return!(conn.query_row("SELECT COALESCE(MAX(id), 0) FROM nodes",
+                                                   &[], |row| row.get(0)));
     Ok(node as u64)
   }
 
   pub fn get_node(&self, node: u64) -> Result<BlobHash, c_int> {
     let conn = self.connection.lock().unwrap();
-    let hash: String = match conn.query_row("SELECT hash FROM nodes WHERE id=?1 ORDER BY creation DESC LIMIT 1",
-                                             &[&(node as i64)], |row| row.get(0)) {
-      Ok(hash) => hash,
-      Err(e) => {println!("error is {:?}", e); return Err(libc::EIO)},
-    };
+    let hash: String = dberror_return!(conn.query_row("SELECT hash FROM nodes WHERE id=?1 ORDER BY creation DESC LIMIT 1",
+                                                      &[&(node as i64)], |row| row.get(0)));
     Ok(Self::hash_from_string(hash))
   }
 
   pub fn set_node(&self, node: u64, hash: &BlobHash) -> Result<(), c_int> {
     let time = timeval();
     let conn = self.connection.lock().unwrap();
-    match conn.execute("INSERT INTO nodes (id, hash, creation) VALUES (?1, ?2, ?3)",
-                 &[&(node as i64), &(hex::encode(hash)), &time]) {
-      Ok(_) => Ok(()),
-      Err(e) => {println!("error is {:?}", e); return Err(libc::EIO)},
-    }
+    dberror_return!(conn.execute("INSERT INTO nodes (id, hash, creation) VALUES (?1, ?2, ?3)",
+                 &[&(node as i64), &(hex::encode(hash)), &time]));
+    Ok(())
   }
 
   #[allow(dead_code)] pub fn get_blob(&self, hash: &BlobHash) -> Result<(bool, u64, i64), c_int> {
     let conn = self.connection.lock().unwrap();
-    let vals: (i64, i64, i64) = match conn.query_row(
+    let vals: (i64, i64, i64) = dberror_return!(conn.query_row(
       "SELECT synced, size, last_use FROM blobs WHERE hash=?1",
-      &[&(hex::encode(hash))], |row| (row.get(0), row.get(1), row.get(2))) {
-      Ok(vals) => vals,
-      Err(e) => {println!("error is {:?}", e); return Err(libc::EIO)},
-    };
+      &[&(hex::encode(hash))], |row| (row.get(0), row.get(1), row.get(2))));
     Ok((vals.0 != 0, vals.1 as u64, vals.2))
   }
 
@@ -106,13 +118,10 @@ impl MetadataDB {
     let mut conn = self.connection.lock().unwrap();
     let tran = conn.transaction().unwrap();
     for (hash, size, time) in vals {
-      match tran.execute(
+      dberror_test!(tran.execute(
         "INSERT OR REPLACE INTO blobs (hash, size, last_use, present, synced) VALUES (?1, ?2, ?3, 1,
            COALESCE((SELECT synced FROM blobs WHERE hash = ?1), 0))",
-        &[&(hex::encode(hash)), &(size as i64), &time]) {
-        Ok(_) => {},
-        Err(e) => {println!("error is {:?}", e);},
-      }
+        &[&(hex::encode(hash)), &(size as i64), &time]));
     }
     tran.commit().unwrap();
   }
@@ -122,11 +131,8 @@ impl MetadataDB {
     let mut conn = self.connection.lock().unwrap();
     let tran = conn.transaction().unwrap();
     for (hash, time) in vals {
-      match tran.execute("UPDATE OR IGNORE blobs SET last_use = ?2 WHERE hash = ?1",
-                   &[&(hex::encode(hash)), &time]) {
-        Ok(_) => {},
-        Err(e) => {println!("error is {:?}", e);},
-      };
+      dberror_test!(tran.execute("UPDATE OR IGNORE blobs SET last_use = ?2 WHERE hash = ?1",
+                   &[&(hex::encode(hash)), &time]));
     }
     tran.commit().unwrap();
   }
@@ -141,11 +147,8 @@ impl MetadataDB {
     let mut conn = self.connection.lock().unwrap();
     let tran = conn.transaction().unwrap();
     for hash in vals {
-      match tran.execute("UPDATE OR IGNORE blobs SET synced = 1 WHERE hash = ?1",
-                   &[&(hex::encode(hash))]) {
-        Ok(_) => {},
-        Err(e) => {println!("error is {:?}", e);},
-      };
+      dberror_test!(tran.execute("UPDATE OR IGNORE blobs SET synced = 1 WHERE hash = ?1",
+                   &[&(hex::encode(hash))]));
     }
     tran.commit().unwrap();
   }
@@ -155,11 +158,8 @@ impl MetadataDB {
     let tran = conn.transaction().unwrap();
     let present: i64 = if deleted { 0 } else { 1 };
     for hash in vals {
-      match tran.execute("UPDATE OR IGNORE blobs SET present = ?2 WHERE hash = ?1",
-                   &[&(hex::encode(hash)), &present]) {
-        Ok(_) => {},
-        Err(e) => {println!("error is {:?}", e);},
-      };
+      dberror_test!(tran.execute("UPDATE OR IGNORE blobs SET present = ?2 WHERE hash = ?1",
+                   &[&(hex::encode(hash)), &present]));
     }
     tran.commit().unwrap();
   }
