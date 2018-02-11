@@ -3,6 +3,10 @@ rust:
   - stable
   - beta
   - nightly
+addons:
+  apt:
+    packages:
+      - libfuse-dev
 notifications:
   email:
     recipients:
