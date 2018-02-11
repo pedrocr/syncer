@@ -1,6 +1,6 @@
 # syncer
 
-**WARNING: This is highly experimental and might eat your data. Make sure you have good backups before you test it.**
+**WARNING: This is highly experimental and will probably eat your data. Make sure you have good backups before you test it.**
 
 [![Build Status](https://travis-ci.org/pedrocr/syncer.svg?branch=master)](https://travis-ci.org/pedrocr/syncer)
 [![Crates.io](https://img.shields.io/crates/v/syncer.svg)](https://crates.io/crates/syncer)
