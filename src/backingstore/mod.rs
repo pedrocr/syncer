@@ -83,15 +83,16 @@ impl BackingStore {
     if let Some(entry) = nodes.remove(&node) {
       try!(self.save_node(node, entry));
     }
+    self.blobs.do_save();
     Ok(())
   }
 
   pub fn sync_all(&self) -> Result<(), c_int> {
-    self.blobs.do_save();
     let mut nodes = self.node_cache.write().unwrap();
     for (node, entry) in nodes.drain() {
       try!(self.save_node(node, entry));
     }
+    self.blobs.do_save();
     Ok(())
   }
 
