@@ -80,23 +80,26 @@ impl MetadataDB {
 
   pub fn max_node(&self) -> Result<u64, c_int> {
     let conn = self.connection.lock().unwrap();
-    let node: i64 = dberror_return!(conn.query_row("SELECT COALESCE(MAX(id), 0) FROM nodes",
-                                                   &[], |row| row.get(0)));
+    let node: i64 = dberror_return!(conn.query_row(
+      "SELECT COALESCE(MAX(id), 0) FROM nodes",
+      &[], |row| row.get(0)));
     Ok(node as u64)
   }
 
   pub fn get_node(&self, node: u64) -> Result<BlobHash, c_int> {
     let conn = self.connection.lock().unwrap();
-    let hash: String = dberror_return!(conn.query_row("SELECT hash FROM nodes WHERE id=?1 ORDER BY creation DESC LIMIT 1",
-                                                      &[&(node as i64)], |row| row.get(0)));
+    let hash: String = dberror_return!(conn.query_row(
+      "SELECT hash FROM nodes WHERE id=?1 ORDER BY creation DESC LIMIT 1",
+      &[&(node as i64)], |row| row.get(0)));
     Ok(Self::hash_from_string(hash))
   }
 
   pub fn set_node(&self, node: u64, hash: &BlobHash) -> Result<(), c_int> {
     let time = timeval();
     let conn = self.connection.lock().unwrap();
-    dberror_return!(conn.execute("INSERT INTO nodes (id, hash, creation) VALUES (?1, ?2, ?3)",
-                 &[&(node as i64), &(hex::encode(hash)), &time]));
+    dberror_return!(conn.execute(
+      "INSERT INTO nodes (id, hash, creation) VALUES (?1, ?2, ?3)",
+      &[&(node as i64), &(hex::encode(hash)), &time]));
     Ok(())
   }
 
@@ -119,8 +122,8 @@ impl MetadataDB {
     let tran = conn.transaction().unwrap();
     for (hash, size, time) in vals {
       dberror_test!(tran.execute(
-        "INSERT OR REPLACE INTO blobs (hash, size, last_use, present, synced) VALUES (?1, ?2, ?3, 1,
-           COALESCE((SELECT synced FROM blobs WHERE hash = ?1), 0))",
+        "INSERT OR REPLACE INTO blobs (hash, size, last_use, present, synced)
+         VALUES (?1, ?2, ?3, 1,COALESCE((SELECT synced FROM blobs WHERE hash = ?1), 0))",
         &[&(hex::encode(hash)), &(size as i64), &time]));
     }
     tran.commit().unwrap();
@@ -131,8 +134,9 @@ impl MetadataDB {
     let mut conn = self.connection.lock().unwrap();
     let tran = conn.transaction().unwrap();
     for (hash, time) in vals {
-      dberror_test!(tran.execute("UPDATE OR IGNORE blobs SET last_use = ?2 WHERE hash = ?1",
-                   &[&(hex::encode(hash)), &time]));
+      dberror_test!(tran.execute(
+        "UPDATE OR IGNORE blobs SET last_use = ?2 WHERE hash = ?1",
+         &[&(hex::encode(hash)), &time]));
     }
     tran.commit().unwrap();
   }
@@ -147,8 +151,9 @@ impl MetadataDB {
     let mut conn = self.connection.lock().unwrap();
     let tran = conn.transaction().unwrap();
     for hash in vals {
-      dberror_test!(tran.execute("UPDATE OR IGNORE blobs SET synced = 1 WHERE hash = ?1",
-                   &[&(hex::encode(hash))]));
+      dberror_test!(tran.execute(
+        "UPDATE OR IGNORE blobs SET synced = 1 WHERE hash = ?1",
+        &[&(hex::encode(hash))]));
     }
     tran.commit().unwrap();
   }
@@ -158,15 +163,17 @@ impl MetadataDB {
     let tran = conn.transaction().unwrap();
     let present: i64 = if deleted { 0 } else { 1 };
     for hash in vals {
-      dberror_test!(tran.execute("UPDATE OR IGNORE blobs SET present = ?2 WHERE hash = ?1",
-                   &[&(hex::encode(hash)), &present]));
+      dberror_test!(
+        tran.execute("UPDATE OR IGNORE blobs SET present = ?2 WHERE hash = ?1",
+        &[&(hex::encode(hash)), &present]));
     }
     tran.commit().unwrap();
   }
 
   pub fn to_upload(&self) -> Vec<BlobHash> {
     let conn = self.connection.lock().unwrap();
-    let mut stmt = conn.prepare("SELECT hash FROM blobs WHERE synced = 0 ORDER BY last_use ASC").unwrap();
+    let mut stmt = conn.prepare(
+      "SELECT hash FROM blobs WHERE synced = 0 ORDER BY last_use ASC").unwrap();
     let hash_iter = stmt.query_map(&[], |row| {
       Self::hash_from_string(row.get(0))
     }).unwrap();
@@ -179,7 +186,9 @@ impl MetadataDB {
 
   pub fn to_delete(&self) -> Vec<(BlobHash, u64)> {
     let conn = self.connection.lock().unwrap();
-    let mut stmt = conn.prepare("SELECT hash, size FROM blobs WHERE synced = 1 and present = 1 ORDER BY last_use ASC LIMIT 1000").unwrap();
+    let mut stmt = conn.prepare(
+      "SELECT hash, size FROM blobs WHERE synced = 1 and present = 1
+       ORDER BY last_use ASC LIMIT 1000").unwrap();
     let hash_iter = stmt.query_map(&[], |row| {
       let hasharray = Self::hash_from_string(row.get(0));
       let size: i64 = row.get(1);
