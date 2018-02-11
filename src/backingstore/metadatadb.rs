@@ -85,16 +85,25 @@ impl MetadataDB {
     Ok((vals.0 != 0, vals.1 as u64, vals.2))
   }
 
-  pub fn set_blob(&self, hash: &BlobHash, size: u64) -> Result<(), c_int> {
-    let conn = self.connection.lock().unwrap();
-    let time = timeval();
-    match conn.execute(
-      "INSERT OR REPLACE INTO blobs (hash, size, last_use, present, synced) VALUES (?1, ?2, ?3, 1,
-         COALESCE((SELECT synced FROM blobs WHERE hash = ?1), 0))",
-      &[&(hex::encode(hash)), &(size as i64), &time]) {
-      Ok(_) => Ok(()),
-      Err(e) => {println!("error is {:?}", e); return Err(libc::EIO)},
+  #[allow(dead_code)] pub fn set_blob(&self, hash: &BlobHash, size: u64) {
+    let mut vals = vec![(hash.clone(), size, timeval())];
+    self.set_blobs(vals.drain(..));
+  }
+
+  pub fn set_blobs<I>(&self, vals: I)
+    where I: Iterator<Item = (BlobHash, u64, i64)> {
+    let mut conn = self.connection.lock().unwrap();
+    let tran = conn.transaction().unwrap();
+    for (hash, size, time) in vals {
+      match tran.execute(
+        "INSERT OR REPLACE INTO blobs (hash, size, last_use, present, synced) VALUES (?1, ?2, ?3, 1,
+           COALESCE((SELECT synced FROM blobs WHERE hash = ?1), 0))",
+        &[&(hex::encode(hash)), &(size as i64), &time]) {
+        Ok(_) => {},
+        Err(e) => {println!("error is {:?}", e);},
+      }
     }
+    tran.commit().unwrap();
   }
 
   pub fn touch_blobs<I>(&self, vals: I)
@@ -202,7 +211,7 @@ mod tests {
     let db = MetadataDB::new(conn);
     let from_hash = [0;HASHSIZE];
     let from_size = 10;
-    db.set_blob(&from_hash, from_size).unwrap();
+    db.set_blob(&from_hash, from_size);
     let from_time = timeval();
     let (synced, size, last_used) = db.get_blob(&from_hash).unwrap();
     assert_eq!(from_size, size);
@@ -222,11 +231,11 @@ mod tests {
     let conn = Connection::open_in_memory().unwrap();
     let db = MetadataDB::new(conn);
     let from_hash = [0;HASHSIZE];
-    db.set_blob(&from_hash, 0).unwrap();
+    db.set_blob(&from_hash, 0);
     db.mark_synced_blob(&from_hash);
     let (_, _, last_used) = db.get_blob(&from_hash).unwrap();
     std::thread::sleep(std::time::Duration::from_millis(10));
-    db.set_blob(&from_hash, 0).unwrap();
+    db.set_blob(&from_hash, 0);
     let (synced, _, new_last_used) = db.get_blob(&from_hash).unwrap();
     assert!(new_last_used > last_used);
     assert_eq!(true, synced);
@@ -239,9 +248,9 @@ mod tests {
     let from_hash1 = [1;HASHSIZE];
     let from_hash2 = [2;HASHSIZE];
     let from_hash3 = [3;HASHSIZE];
-    db.set_blob(&from_hash1, 0).unwrap();
-    db.set_blob(&from_hash2, 0).unwrap();
-    db.set_blob(&from_hash3, 0).unwrap();
+    db.set_blob(&from_hash1, 0);
+    db.set_blob(&from_hash2, 0);
+    db.set_blob(&from_hash3, 0);
     db.mark_synced_blob(&from_hash2);
     let to_upload: Vec<BlobHash> = db.to_upload().into();
     assert_eq!(vec![from_hash1, from_hash3], to_upload);
@@ -255,10 +264,10 @@ mod tests {
     let from_hash2 = [2;HASHSIZE];
     let from_hash3 = [3;HASHSIZE];
     let from_hash4 = [4;HASHSIZE];
-    db.set_blob(&from_hash1, 10).unwrap();
-    db.set_blob(&from_hash2, 20).unwrap();
-    db.set_blob(&from_hash3, 30).unwrap();
-    db.set_blob(&from_hash4, 40).unwrap();
+    db.set_blob(&from_hash1, 10);
+    db.set_blob(&from_hash2, 20);
+    db.set_blob(&from_hash3, 30);
+    db.set_blob(&from_hash4, 40);
     db.mark_synced_blob(&from_hash2);
     db.mark_synced_blob(&from_hash3);
     db.mark_synced_blob(&from_hash4);
@@ -276,8 +285,8 @@ mod tests {
     assert_eq!(0, db.localbytes());
     let from_hash1 = [1;HASHSIZE];
     let from_hash2 = [2;HASHSIZE];
-    db.set_blob(&from_hash1, 10).unwrap();
-    db.set_blob(&from_hash2, 20).unwrap();
+    db.set_blob(&from_hash1, 10);
+    db.set_blob(&from_hash2, 20);
     assert_eq!(30, db.localbytes());
     db.mark_deleted_blobs(&[from_hash2], true);
     assert_eq!(10, db.localbytes());

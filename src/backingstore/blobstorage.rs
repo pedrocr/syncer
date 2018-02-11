@@ -97,6 +97,7 @@ pub struct BlobStorage {
   server: String,
   metadata: MetadataDB,
   new_blobs: RwLock<VecDeque<BlobHash>>,
+  written_blobs: RwLock<Vec<(BlobHash, u64, i64)>>,
   touched_blobs: RwLock<HashMap<BlobHash,i64>>,
 }
 
@@ -122,6 +123,7 @@ impl BlobStorage {
       server: server.to_string(),
       metadata: meta,
       new_blobs: RwLock::new(to_upload),
+      written_blobs: RwLock::new(Vec::new()),
       touched_blobs: RwLock::new(HashMap::new()),
     })
   }
@@ -180,9 +182,14 @@ impl BlobStorage {
   fn store_blob(&self, blob: Blob) -> Result<(), c_int> {
     let file = self.local_path(&blob.hash);
     try!(blob.store(&file));
-    try!(self.metadata.set_blob(&blob.hash, blob.data.len() as u64));
-    let mut new_blobs = self.new_blobs.write().unwrap();
-    new_blobs.push_back(blob.hash);
+    {
+      let mut written_blobs = self.written_blobs.write().unwrap();
+      written_blobs.push((blob.hash, blob.data.len() as u64, timeval()));
+    }
+    {
+      let mut new_blobs = self.new_blobs.write().unwrap();
+      new_blobs.push_back(blob.hash);
+    }
     Ok(())
   }
 
@@ -253,6 +260,11 @@ impl BlobStorage {
     cmd.arg("--inplace");
     cmd.arg("--whole-file");
     cmd
+  }
+
+  pub fn do_save(&self) {
+    let mut written_blobs = self.written_blobs.write().unwrap();
+    self.metadata.set_blobs(written_blobs.drain(..));
   }
 
   pub fn do_uploads(&self) {
