@@ -73,6 +73,15 @@ impl MetadataDB {
       last_use        INTEGER NOT NULL
     )", &[]).unwrap();
 
+    connection.execute("CREATE INDEX IF NOT EXISTS node_id
+                        ON nodes (id, creation)", &[]).unwrap();
+
+    connection.execute("CREATE INDEX IF NOT EXISTS blob_upload
+                        ON blobs (synced)", &[]).unwrap();
+
+    connection.execute("CREATE INDEX IF NOT EXISTS blob_delete
+                        ON blobs (synced, present, last_use)", &[]).unwrap();
+
     Self {
       connection: Mutex::new(connection),
     }
