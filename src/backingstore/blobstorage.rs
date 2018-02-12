@@ -254,7 +254,6 @@ impl BlobStorage {
     let mut cmd = Command::new("rsync");
     cmd.arg("--quiet");
     cmd.arg("--timeout=5");
-    cmd.arg("--inplace");
     cmd.arg("--whole-file");
     cmd
   }
