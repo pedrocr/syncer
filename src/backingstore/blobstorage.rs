@@ -75,10 +75,10 @@ impl Blob {
 
   fn write(&self, offset: usize, data: &[u8]) -> Blob {
     let start = offset;
-    let end = cmp::min(offset+data.len(), self.data.len());
-    let bytes = end - start;
+    let end = offset+data.len();
     let mut newdata = self.data.clone();
-    newdata[start..end].copy_from_slice(&data[0..bytes]);
+    if end > newdata.len() { newdata.resize(end, 0) }
+    newdata[start..end].copy_from_slice(&data[..]);
     Self::new_with_data(newdata)
   }
 

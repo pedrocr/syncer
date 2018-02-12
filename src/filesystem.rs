@@ -15,10 +15,6 @@ use self::fuse_mt::*;
 use backingstore::*;
 use settings::*;
 
-lazy_static! {
-  static ref BLKZERO: BlobHash = BackingStore::blob_zero(BLKSIZE);
-}
-
 #[derive(Serialize, Deserialize)]
 #[serde(remote = "Timespec")]
 #[allow(dead_code)]
@@ -140,7 +136,7 @@ impl FSEntry {
     self.size = cmp::max(self.size, offset + data.len() as u64);
     let total_needed_blocks = (self.size as usize + BLKSIZE - 1) / BLKSIZE;
     if total_needed_blocks > self.blocks.len() {
-      self.blocks.resize(total_needed_blocks, *BLKZERO);
+      self.blocks.resize(total_needed_blocks, bs.blob_zero());
     }
 
     let start = offset as usize;
@@ -212,10 +208,6 @@ impl<'a> FS<'a> {
       handles: RwLock::new(HashMap::new()),
       handle_counter: Mutex::new(0),
     };
-
-    // Make sure the empty block exists
-    let empty_block = [0 as u8; BLKSIZE];
-    try!(fs.backing.add_blob(&empty_block));
 
     // Add a root node as 0 if it doesn't exist
     match fs.backing.get_node(0) {
@@ -422,9 +414,7 @@ impl<'a> FilesystemMT for FS<'a> {
   fn symlink(&self, _req: RequestInfo, parent: &Path, name: &OsStr, target: &Path) -> ResultEntry {
     let node = try!(self.find_node(parent));
     let data = target.as_os_str().as_bytes();
-    let mut blockdata = [0; BLKSIZE];
-    blockdata[0..data.len()].copy_from_slice(data);
-    let blob = try!(self.backing.add_blob(&blockdata));
+    let blob = try!(self.backing.add_blob(&data));
     let entry = try!(self.with_node(node, &(|parent| {
       let mut e = FSEntry::new(FileTypeDef::Symlink);
       e.blocks = vec![blob];

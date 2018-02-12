@@ -17,22 +17,27 @@ pub struct BackingStore {
   blobs: BlobStorage,
   node_counter: Mutex<u64>,
   node_cache: RwLock<HashMap<u64, FSEntry>>,
+  zero: BlobHash,
 }
 
 impl BackingStore {
   pub fn new(path: &str, server: &str, maxbytes: u64) -> Result<Self, c_int> {
     let bs = try!(BlobStorage::new(path, server, maxbytes));
+    let zero = BlobStorage::zero(1);
     let nodecount = try!(bs.max_node()) + 1;
 
-    Ok(Self {
+    let out = Self {
       blobs: bs,
       node_counter: Mutex::new(nodecount),
       node_cache: RwLock::new(HashMap::new()),
-    })
+      zero: zero,
+    };
+    try!(out.add_blob(&[0]));
+    Ok(out)
   }
 
-  pub fn blob_zero(size: usize) -> BlobHash {
-    BlobStorage::zero(size)
+  pub fn blob_zero(&self) -> BlobHash {
+    self.zero
   }
 
   pub fn add_blob(&self, data: &[u8]) -> Result<BlobHash, c_int> {
