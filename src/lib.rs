@@ -12,6 +12,7 @@ use std::sync::mpsc;
 
 mod filesystem;
 mod backingstore;
+mod settings;
 
 use self::backingstore::BackingStore;
 use self::filesystem::FS;

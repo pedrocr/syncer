@@ -12,10 +12,8 @@ use self::time::Timespec;
 use self::libc::c_int;
 use std::cmp;
 use self::fuse_mt::*;
-use super::backingstore::*;
-
-const BLKSIZE: usize = 4096;
-const READAHEAD: usize = 800;
+use backingstore::*;
+use settings::*;
 
 lazy_static! {
   static ref BLKZERO: BlobHash = BackingStore::blob_zero(BLKSIZE);

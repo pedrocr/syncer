@@ -4,6 +4,7 @@ extern crate hex;
 extern crate time;
 
 use super::blobstorage::*;
+use settings::*;
 use self::rusqlite::Connection;
 use self::libc::c_int;
 use std::sync::Mutex;
@@ -181,8 +182,8 @@ impl MetadataDB {
 
   pub fn to_upload(&self) -> Vec<BlobHash> {
     let conn = self.connection.lock().unwrap();
-    let mut stmt = conn.prepare(
-      "SELECT hash FROM blobs WHERE synced = 0 LIMIT 800").unwrap();
+    let mut stmt = conn.prepare(&format!(
+      "SELECT hash FROM blobs WHERE synced = 0 LIMIT {}", TO_UPLOAD)).unwrap();
     let hash_iter = stmt.query_map(&[], |row| {
       Self::hash_from_string(row.get(0))
     }).unwrap();
@@ -195,9 +196,9 @@ impl MetadataDB {
 
   pub fn to_delete(&self) -> Vec<(BlobHash, u64)> {
     let conn = self.connection.lock().unwrap();
-    let mut stmt = conn.prepare(
+    let mut stmt = conn.prepare(&format!(
       "SELECT hash, size FROM blobs WHERE synced = 1 and present = 1
-       ORDER BY last_use ASC LIMIT 1000").unwrap();
+       ORDER BY last_use ASC LIMIT {}", TO_DELETE)).unwrap();
     let hash_iter = stmt.query_map(&[], |row| {
       let hasharray = Self::hash_from_string(row.get(0));
       let size: i64 = row.get(1);

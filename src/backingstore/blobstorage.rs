@@ -4,6 +4,7 @@ extern crate hex;
 extern crate libc;
 
 use super::metadatadb::*;
+use settings::*;
 use self::rusqlite::Connection;
 use self::blake2::Blake2b;
 use self::blake2::digest::{Input, VariableOutput};
@@ -17,7 +18,6 @@ use std::process::Command;
 use std::collections::HashMap;
 use std::sync::RwLock;
 
-pub const HASHSIZE: usize = 20;
 pub type BlobHash = [u8;HASHSIZE];
 
 #[derive(Clone)]
