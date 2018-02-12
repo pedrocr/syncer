@@ -297,16 +297,21 @@ impl BlobStorage {
       let mut deleted = Vec::new();
       for (hash, size) in hashes_to_delete {
         let path = self.local_path(&hash);
-        match fs::remove_file(&path) {
-          Ok(_) => {
-            deleted_bytes += size;
-            deleted.push(hash);
-            if deleted_bytes >= bytes_to_delete {
-              break
-            }
-          },
-          Err(_) => eprintln!("Couldn't delete {:?}", path),
-        };
+        let delete_worked = fs::remove_file(&path).is_ok();
+        if !delete_worked {
+          if !path.exists() {
+            eprintln!("WARNING: tried to delete file that's already gone {:?}", path);
+          } else {
+            eprintln!("WARNING: failed to delete {:?}", path);
+            continue; // We couldn't delete the file so space is not reclaimed
+          }
+        }
+
+        deleted_bytes += size;
+        deleted.push(hash);
+        if deleted_bytes >= bytes_to_delete {
+          break
+        }
       }
       self.metadata.mark_deleted_blobs(&deleted, true);
 
