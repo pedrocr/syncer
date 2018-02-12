@@ -173,7 +173,7 @@ impl MetadataDB {
   pub fn to_upload(&self) -> Vec<BlobHash> {
     let conn = self.connection.lock().unwrap();
     let mut stmt = conn.prepare(
-      "SELECT hash FROM blobs WHERE synced = 0 ORDER BY last_use ASC LIMIT 800").unwrap();
+      "SELECT hash FROM blobs WHERE synced = 0 LIMIT 800").unwrap();
     let hash_iter = stmt.query_map(&[], |row| {
       Self::hash_from_string(row.get(0))
     }).unwrap();
