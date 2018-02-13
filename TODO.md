@@ -1,6 +1,11 @@
 Normal bugs:
   - Fix broken access to inode 0 on initial startup
 
+Make metadata much less likely to be evicted
+  - Listing directories should be generally faster than opening files. Right now since directories end up being small blobs this is particularly unfriendly as fetching a bunch of small blobs is very slow
+  - Either completely exclude metadata from being evicted or just make it very unlikely by putting it all after files
+  - In either case a new column is needed in the blobs table to signal the type of blob and thus allowing `to_delete()` to exclude or sort based on it
+
 Figure out how to reduce lock contention:
   - Currently the node and blob hashes have a lot of lock contention under write loads
   - In reality unless you're actually reading/writing to the same file from several threads (very unlikely) there's probably not much actual contention for resources but since it all goes through the same `RwLock` it bogs down substantially
