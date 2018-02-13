@@ -313,19 +313,16 @@ mod tests {
     let from_hash1 = [1;HASHSIZE];
     let from_hash2 = [2;HASHSIZE];
     let from_hash3 = [3;HASHSIZE];
-    let from_hash4 = [4;HASHSIZE];
-    db.set_blob(&from_hash1, 10);
-    db.set_blob(&from_hash2, 20);
-    db.set_blob(&from_hash3, 30);
-    db.set_blob(&from_hash4, 40);
+    db.set_blob(&from_hash1, 100000);
+    db.set_blob(&from_hash2, 200000);
+    db.set_blob(&from_hash3, 300000);
     db.mark_synced_blob(&from_hash2);
     db.mark_synced_blob(&from_hash3);
-    db.mark_synced_blob(&from_hash4);
-    assert_eq!(vec![(from_hash2, 20), (from_hash3, 30), (from_hash4, 40)], db.to_delete());
+    assert_eq!(vec![(from_hash2, 200000), (from_hash3, 300000)], db.to_delete());
     db.mark_deleted_blobs(&[from_hash2], true);
-    assert_eq!(vec![(from_hash3, 30), (from_hash4, 40)], db.to_delete());
+    assert_eq!(vec![(from_hash3, 300000)], db.to_delete());
     db.mark_deleted_blobs(&[from_hash2], false);
-    assert_eq!(vec![(from_hash2, 20), (from_hash3, 30), (from_hash4, 40)], db.to_delete());
+    assert_eq!(vec![(from_hash2, 200000), (from_hash3, 300000)], db.to_delete());
   }
 
   #[test]
