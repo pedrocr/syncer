@@ -139,10 +139,6 @@ impl BlobStorage {
     remote
   }
 
-  pub fn read_all(&self, hash: &BlobHash) -> Result<Vec<u8>, c_int> {
-    self.read(0, 0, hash, 0, usize::MAX)
-  }
-
   pub fn read(&self, node: u64, block: usize, hash: &BlobHash, offset: usize, bytes: usize) -> Result<Vec<u8>, c_int> {
     // First figure out if this isn't a cached blob
     let blob_cache = self.blob_cache.read().unwrap();
@@ -239,7 +235,9 @@ impl BlobStorage {
   }
 
   pub fn read_node(&self, node: u64) -> Result<Vec<u8>, c_int> {
-    self.read_all(&try!(self.metadata.get_node(node)))
+    let hash = try!(self.metadata.get_node(node));
+    let blob = try!(self.get_blob(&hash));
+    Ok(blob.read(0, usize::MAX))
   }
 
   fn upload_to_server(&self, hashes: &[BlobHash]) -> Result<(), c_int> {
