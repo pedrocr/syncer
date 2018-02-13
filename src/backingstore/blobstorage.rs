@@ -5,6 +5,7 @@ extern crate libc;
 
 use super::metadatadb::*;
 use settings::*;
+use rwhashes::*;
 use self::rusqlite::Connection;
 use self::blake2::Blake2b;
 use self::blake2::digest::{Input, VariableOutput};
@@ -93,7 +94,7 @@ pub struct BlobStorage {
   metadata: MetadataDB,
   written_blobs: RwLock<Vec<(BlobHash, u64, i64)>>,
   touched_blobs: RwLock<HashMap<BlobHash,i64>>,
-  blob_cache: RwLock<HashMap<u64, HashMap<usize, Blob>>>,
+  blob_cache: RwHashes<u64, HashMap<usize, Blob>>,
 }
 
 impl BlobStorage {
@@ -118,7 +119,7 @@ impl BlobStorage {
       metadata: meta,
       written_blobs: RwLock::new(Vec::new()),
       touched_blobs: RwLock::new(HashMap::new()),
-      blob_cache: RwLock::new(HashMap::new()),
+      blob_cache: RwHashes::new(8),
     })
   }
 
@@ -141,7 +142,7 @@ impl BlobStorage {
 
   pub fn read(&self, node: u64, block: usize, hash: &BlobHash, offset: usize, bytes: usize) -> Result<Vec<u8>, c_int> {
     // First figure out if this isn't a cached blob
-    let blob_cache = self.blob_cache.read().unwrap();
+    let blob_cache = self.blob_cache.read(node);
     if let Some(blocks) = blob_cache.get(&node) {
       if let Some(blob) = blocks.get(&block) {
         return Ok(blob.read(offset, bytes))
@@ -155,7 +156,7 @@ impl BlobStorage {
   pub fn write(&self, node: u64, block: usize, hash: &BlobHash, offset: usize, data: &[u8]) -> Result<(), c_int> {
     // First figure out if this isn't a cached blob
     {
-      let mut blob_cache = self.blob_cache.write().unwrap();
+      let mut blob_cache = self.blob_cache.write(node);
       if let Some(blocks) = blob_cache.get_mut(&node) {
         if let Some(mut blob) = blocks.get_mut(&block) {
           return Ok(blob.write(offset, data))
@@ -167,7 +168,7 @@ impl BlobStorage {
     let hash = blob.write(offset, data);
 
     // Store the blob in the cache
-    let mut blob_cache = self.blob_cache.write().unwrap();
+    let mut blob_cache = self.blob_cache.write(node);
     let blocks = blob_cache.entry(node).or_insert(HashMap::new());
     blocks.insert(block, blob);
 
@@ -176,7 +177,7 @@ impl BlobStorage {
 
   pub fn sync_node(&self, node: u64) -> Result<Vec<(usize, BlobHash)>, c_int> {
     let mut stored = Vec::new();
-    let mut blob_cache = self.blob_cache.write().unwrap();
+    let mut blob_cache = self.blob_cache.write(node);
     if let Some(mut blocks) = blob_cache.remove(&node) {
       for (i, blob) in blocks.drain() {
         let hash = try!(self.store_blob(blob));
