@@ -7,13 +7,14 @@ use std::path::Path;
 use std::ffi::{OsStr, OsString};
 use std::os::unix::ffi::OsStrExt;
 use std::collections::HashMap;
-use std::sync::{RwLock, Mutex};
+use std::sync::Mutex;
 use self::time::Timespec;
 use self::libc::c_int;
 use std::cmp;
 use self::fuse_mt::*;
 use backingstore::*;
 use settings::*;
+use rwhashes::*;
 
 #[derive(Serialize, Deserialize)]
 #[serde(remote = "Timespec")]
@@ -195,7 +196,7 @@ struct Handle {
 
 pub struct FS<'a> {
   backing: &'a BackingStore,
-  handles: RwLock<HashMap<u64,Handle>>,
+  handles: RwHashes<u64,Handle>,
   handle_counter: Mutex<u64>,
 }
 
@@ -203,7 +204,7 @@ impl<'a> FS<'a> {
   pub fn new(bs: &'a BackingStore) -> Result<FS<'a>, c_int> {
     let fs = FS {
       backing: bs,
-      handles: RwLock::new(HashMap::new()),
+      handles: RwHashes::new(8),
       handle_counter: Mutex::new(0),
     };
 
@@ -234,7 +235,7 @@ impl<'a> FS<'a> {
   fn with_handle<F,T>(&self, handle: u64, closure: &F) -> Result<T, c_int>
     where F : Fn(&FSEntry, u64) -> T {
     let node = {
-      let handles = self.handles.read().unwrap();
+      let handles = self.handles.read(handle);
       match handles.get(&handle) {
         Some(h) => h.node,
         None => return Err(libc::EBADF),
@@ -265,7 +266,7 @@ impl<'a> FS<'a> {
   fn modify_handle<F,T>(&self, handle: u64, cache: bool, closure: &F) -> Result<T, c_int>
     where F : Fn(&mut FSEntry, u64) -> T {
     let node = {
-      let handles = self.handles.read().unwrap();
+      let handles = self.handles.read(handle);
       match handles.get(&handle) {
         Some(h) => h.node,
         None => return Err(libc::EBADF),
@@ -306,13 +307,13 @@ impl<'a> FS<'a> {
       *counter += 1;
       *counter
     };
-    let mut handles = self.handles.write().unwrap();
+    let mut handles = self.handles.write(count);
     handles.insert(count, handle);
     count
   }
 
   fn delete_handle(&self, handle: u64) -> Result<(), c_int> {
-    let mut handles = self.handles.write().unwrap();
+    let mut handles = self.handles.write(handle);
     if let Some(handle) = handles.remove(&handle) {
       try!(self.backing.sync_node(handle.node));
     }
