@@ -1,5 +1,4 @@
 Normal bugs:
- - Figure out why rsync is so slow at fetching files from the network
 
 Figure out how to reduce lock contention:
   - Currently the node and blob hashes have a lot of lock contention under write loads
