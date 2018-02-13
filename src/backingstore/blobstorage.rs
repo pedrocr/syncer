@@ -21,7 +21,7 @@ use std::sync::RwLock;
 pub type BlobHash = [u8;HASHSIZE];
 
 #[derive(Clone)]
-struct Blob {
+pub struct Blob {
   data: Vec<u8>,
   hash: BlobHash,
 }
@@ -98,6 +98,7 @@ pub struct BlobStorage {
   metadata: MetadataDB,
   written_blobs: RwLock<Vec<(BlobHash, u64, i64)>>,
   touched_blobs: RwLock<HashMap<BlobHash,i64>>,
+  blob_cache: RwLock<HashMap<u64, HashMap<usize, Blob>>>,
 }
 
 impl BlobStorage {
@@ -122,6 +123,7 @@ impl BlobStorage {
       metadata: meta,
       written_blobs: RwLock::new(Vec::new()),
       touched_blobs: RwLock::new(HashMap::new()),
+      blob_cache: RwLock::new(HashMap::new()),
     })
   }
 
@@ -143,20 +145,57 @@ impl BlobStorage {
   }
 
   pub fn read_all(&self, hash: &BlobHash) -> Result<Vec<u8>, c_int> {
-    self.read(hash, 0, usize::MAX, &[])
+    self.read(0, 0, hash, 0, usize::MAX, &[])
   }
 
-  pub fn read(&self, hash: &BlobHash, offset: usize, bytes: usize, readahead: &[BlobHash]) -> Result<Vec<u8>, c_int> {
+  pub fn read(&self, node: u64, block: usize, hash: &BlobHash, offset: usize, bytes: usize, readahead: &[BlobHash]) -> Result<Vec<u8>, c_int> {
+    // First figure out if this isn't a cached blob
+    let blob_cache = self.blob_cache.read().unwrap();
+    if let Some(blocks) = blob_cache.get(&node) {
+      if let Some(blob) = blocks.get(&block) {
+        return Ok(blob.read(offset, bytes))
+      }
+    }
+
     let blob = try!(self.get_blob(hash, readahead));
     Ok(blob.read(offset, bytes))
   }
 
-  pub fn write(&self, hash: &BlobHash, offset: usize, data: &[u8], readahead: &[BlobHash]) -> Result<BlobHash, c_int> {
-    let blob = try!(self.get_blob(hash, readahead));
-    let new_blob = blob.write(offset, data);
+  pub fn write(&self, node: u64, block: usize, hash: &BlobHash, offset: usize, data: &[u8], readahead: &[BlobHash]) -> Result<BlobHash, c_int> {
+    let new_blob = try!(self.create_new_blob(node, block, hash, offset, data, readahead));
     let hash = new_blob.hash;
-    try!(self.store_blob(new_blob));
+
+    // Store the blob in the cache
+    let mut blob_cache = self.blob_cache.write().unwrap();
+    let blocks = blob_cache.entry(node).or_insert(HashMap::new());
+    blocks.insert(block, new_blob);
+
     Ok(hash)
+  }
+
+  pub fn create_new_blob(&self, node: u64, block: usize, hash: &BlobHash, offset: usize, data: &[u8], readahead: &[BlobHash]) -> Result<Blob, c_int> {
+    // First figure out if this isn't a cached blob
+    {
+      let blob_cache = self.blob_cache.read().unwrap();
+      if let Some(blocks) = blob_cache.get(&node) {
+        if let Some(blob) = blocks.get(&block) {
+          return Ok(blob.write(offset, data))
+        }
+      }
+    }
+
+    let blob = try!(self.get_blob(hash, readahead));
+    Ok(blob.write(offset, data))
+  }
+
+  pub fn sync_node(&self, node: u64) -> Result<(), c_int> {
+    let mut blob_cache = self.blob_cache.write().unwrap();
+    if let Some(mut blocks) = blob_cache.remove(&node) {
+      for (_, blob) in blocks.drain() {
+        try!(self.store_blob(blob));
+      }
+    }
+    Ok(())
   }
 
   fn get_blob(&self, hash: &BlobHash, readahead: &[BlobHash]) -> Result<Blob, c_int> {

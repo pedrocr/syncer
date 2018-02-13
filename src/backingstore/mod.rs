@@ -78,18 +78,19 @@ impl BackingStore {
     }
   }
 
-  pub fn read(&self, hash: &BlobHash, offset: usize, bytes: usize, readahead: &[BlobHash]) -> Result<Vec<u8>, c_int> {
-    self.blobs.read(hash, offset, bytes, readahead)
+  pub fn read(&self, node: u64, block: usize, hash: &BlobHash, offset: usize, bytes: usize, readahead: &[BlobHash]) -> Result<Vec<u8>, c_int> {
+    self.blobs.read(node, block, hash, offset, bytes, readahead)
   }
 
-  pub fn write(&self, hash: &BlobHash, offset: usize, data: &[u8], readahead: &[BlobHash]) -> Result<BlobHash, c_int> {
-    self.blobs.write(hash, offset, data, readahead)
+  pub fn write(&self, node: u64, block: usize, hash: &BlobHash, offset: usize, data: &[u8], readahead: &[BlobHash]) -> Result<BlobHash, c_int> {
+    self.blobs.write(node, block, hash, offset, data, readahead)
   }
 
   pub fn sync_node(&self, node: u64) -> Result<(), c_int> {
     let mut nodes = self.node_cache.write().unwrap();
     if let Some(entry) = nodes.remove(&node) {
       try!(self.save_node(node, entry));
+      try!(self.blobs.sync_node(node));
     }
     self.blobs.do_save();
     Ok(())
@@ -99,6 +100,7 @@ impl BackingStore {
     let mut nodes = self.node_cache.write().unwrap();
     for (node, entry) in nodes.drain() {
       try!(self.save_node(node, entry));
+      try!(self.blobs.sync_node(node));
     }
     self.blobs.do_save();
     Ok(())
