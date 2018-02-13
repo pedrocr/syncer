@@ -16,7 +16,7 @@ The basic program works and syncs to a remote rsync/ssh server. This should be e
 
   - The standard POSIX filesystem works and persists to disk (tested on Linux, might work on OSX as well)
   - Pushing to the remote server and pulling on demand works as well
-  - The total speed should be fast enough for reasonable usage but it certainly won't be a speed daemon
+  - Speed is quite similar to direct to disk with more CPU usage (see the Performance section)
 
 Still on the TODO list:
 
@@ -26,6 +26,17 @@ Still on the TODO list:
   - Allow marking certain files/directories as allways available locally so you can set it on the thumbnail dir of a photo application and get fast browsing at all times
   - Expose a Time Machine like interface showing read-only snapshots of the filesytem (already present in the data but not exposed) 
   - Figure out a good way to evict old data (currently all history is kept)
+
+Performance
+-----------
+
+Proper benchmarking is still needed but the current state should be good enough for most uses:
+
+  - A simple write benchmark (15GB rsync from a local folder) showed that syncer is reasonably competitive to normal disk writing. Syncer got 49MB/s and the equivalent rsync directly to disk got 54MB/s. CPU usage was higher but not worriyingly so. That's to be expected as syncer is hashing all the blocks with Blake2 (which is very fast but not irrelevant).
+  - Syncer has 16 parallel threads and fine grained locks which allows concurrent usage of multiple files/directories without issue.
+  - Fetching/sending from/to the server is dependent on your specific network characteristics. But since blobs smaller than 64kB are never evicted from local cache, reading metadata (listing directories and accessing file properties) tends to be quite fast and small files will also all be local. Large files that are not local have bearable performance as long as your network is good since data blocks are 1MB.
+
+Reports of specific use cases that are too slow are more than welcome.
 
 Usage
 -----
