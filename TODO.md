@@ -1,5 +1,4 @@
 Normal bugs:
-  - Fix broken access to inode 0 on initial startup
 
 Make metadata much less likely to be evicted
   - Listing directories should be generally faster than opening files. Right now since directories end up being small blobs this is particularly unfriendly as fetching a bunch of small blobs is very slow

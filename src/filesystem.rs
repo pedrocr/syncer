@@ -208,15 +208,12 @@ impl<'a> FS<'a> {
     };
 
     // Add a root node as 0 if it doesn't exist
-    match fs.backing.get_node(0) {
-      Ok(_) => {},
-      Err(_) => {
-        let mut root = FSEntry::new(FileTypeDef::Directory);
-        root.perm = 0o755;
-        root.uid = users::get_current_uid();
-        root.gid = users::get_current_gid();
-        try!(fs.backing.save_node(0, root));
-      }
+    if !try!(fs.backing.node_exists(0)) {
+      let mut root = FSEntry::new(FileTypeDef::Directory);
+      root.perm = 0o755;
+      root.uid = users::get_current_uid();
+      root.gid = users::get_current_gid();
+      try!(fs.backing.save_node(0, root));
     }
     Ok(fs)
   }

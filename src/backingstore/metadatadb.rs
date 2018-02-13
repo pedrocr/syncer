@@ -96,6 +96,14 @@ impl MetadataDB {
     Ok(node as u64)
   }
 
+  pub fn node_exists(&self, node: u64) -> Result<bool, c_int> {
+    let conn = self.connection.lock().unwrap();
+    let count: i64 = dberror_return!(conn.query_row(
+      "SELECT count(*) FROM nodes WHERE id=?1 LIMIT 1",
+      &[&(node as i64)], |row| row.get(0)));
+    Ok(count > 0)
+  }
+
   pub fn get_node(&self, node: u64) -> Result<BlobHash, c_int> {
     let conn = self.connection.lock().unwrap();
     let hash: String = dberror_return!(conn.query_row(
@@ -229,8 +237,10 @@ mod tests {
   fn set_and_get_node() {
     let conn = Connection::open_in_memory().unwrap();
     let db = MetadataDB::new(conn);
+    assert_eq!(db.node_exists(0).unwrap(), false);
     let from_hash = [0;HASHSIZE];
     db.set_node(0, &from_hash).unwrap();
+    assert_eq!(db.node_exists(0).unwrap(), true);
     let hash = db.get_node(0).unwrap();
     assert_eq!(from_hash, hash);
   }

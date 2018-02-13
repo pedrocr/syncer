@@ -240,6 +240,10 @@ impl BlobStorage {
     Ok(blob.read(0, usize::MAX))
   }
 
+  pub fn node_exists(&self, node: u64) -> Result<bool, c_int> {
+    self.metadata.node_exists(node)
+  }
+
   fn upload_to_server(&self, hashes: &[BlobHash]) -> Result<(), c_int> {
     for _ in 0..10 {
       let mut cmd = self.connect_to_server();

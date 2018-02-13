@@ -78,6 +78,14 @@ impl BackingStore {
     }
   }
 
+  pub fn node_exists(&self, node: u64) -> Result<bool, c_int> {
+    let nodes = self.node_cache.read().unwrap();
+    Ok(match nodes.get(&node) {
+      Some(_) => true,
+      None => try!(self.blobs.node_exists(node)),
+    })
+  }
+
   pub fn read(&self, node: u64, block: usize, hash: &BlobHash, offset: usize, bytes: usize) -> Result<Vec<u8>, c_int> {
     self.blobs.read(node, block, hash, offset, bytes)
   }
