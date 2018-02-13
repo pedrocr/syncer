@@ -37,4 +37,12 @@ impl<K: Hash + Eq,V> RwHashes<K,V> {
   pub fn write(&self, key: K) -> RwLockWriteGuard<HashMap<K,V>> {
     self.buckets[self.get_bucket(key)].write().unwrap()
   }
+
+  pub fn write_pos(&self, index: usize) -> RwLockWriteGuard<HashMap<K,V>> {
+    self.buckets[index].write().unwrap()
+  }
+
+  pub fn len(&self) -> usize {
+    self.buckets.len()
+  }
 }

@@ -7,16 +7,16 @@ mod metadatadb;
 use self::blobstorage::*;
 pub use self::blobstorage::BlobHash;
 use super::filesystem::FSEntry;
+use rwhashes::*;
 
 use self::bincode::{serialize, deserialize, Infinite};
 use self::libc::c_int;
-use std::sync::{Mutex, RwLock};
-use std::collections::HashMap;
+use std::sync::Mutex;
 
 pub struct BackingStore {
   blobs: BlobStorage,
   node_counter: Mutex<u64>,
-  node_cache: RwLock<HashMap<u64, FSEntry>>,
+  node_cache: RwHashes<u64, FSEntry>,
   zero: BlobHash,
 }
 
@@ -29,7 +29,7 @@ impl BackingStore {
     let out = Self {
       blobs: bs,
       node_counter: Mutex::new(nodecount),
-      node_cache: RwLock::new(HashMap::new()),
+      node_cache: RwHashes::new(8),
       zero: zero,
     };
     try!(out.add_blob(&[0]));
@@ -61,13 +61,13 @@ impl BackingStore {
   }
 
   pub fn save_node_cached(&self, node: u64, entry: FSEntry) -> Result<(), c_int> {
-    let mut nodes = self.node_cache.write().unwrap();
+    let mut nodes = self.node_cache.write(node);
     nodes.insert(node, entry);
     Ok(())
   }
 
   pub fn get_node(&self, node: u64) -> Result<FSEntry, c_int> {
-    let nodes = self.node_cache.read().unwrap();
+    let nodes = self.node_cache.read(node);
     match nodes.get(&node) {
       Some(n) => Ok((*n).clone()),
       None => {
@@ -79,7 +79,7 @@ impl BackingStore {
   }
 
   pub fn node_exists(&self, node: u64) -> Result<bool, c_int> {
-    let nodes = self.node_cache.read().unwrap();
+    let nodes = self.node_cache.read(node);
     Ok(match nodes.get(&node) {
       Some(_) => true,
       None => try!(self.blobs.node_exists(node)),
@@ -103,7 +103,7 @@ impl BackingStore {
   }
 
   pub fn sync_node(&self, node: u64) -> Result<(), c_int> {
-    let mut nodes = self.node_cache.write().unwrap();
+    let mut nodes = self.node_cache.write(node);
     if let Some(entry) = nodes.remove(&node) {
       try!(self.sync_one_node(node, entry));
     }
@@ -112,9 +112,11 @@ impl BackingStore {
   }
 
   pub fn sync_all(&self) -> Result<(), c_int> {
-    let mut nodes = self.node_cache.write().unwrap();
-    for (node, entry) in nodes.drain() {
-      try!(self.sync_one_node(node, entry));
+    for i in 0..self.node_cache.len() {
+      let mut nodes = self.node_cache.write_pos(i);
+      for (node, entry) in nodes.drain() {
+        try!(self.sync_one_node(node, entry));
+      }
     }
     self.blobs.do_save();
     Ok(())
