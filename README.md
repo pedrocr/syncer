@@ -21,7 +21,7 @@ The basic program works and syncs to a remote rsync/ssh server. This should be e
 Still on the TODO list:
 
   - Stress test and build a repeatable testing set for all POSIX operations
-  - Tune for performance more thoroughly (for example very small sequential writes are a pathological case right now)
+  - Tune for performance more thoroughly
   - Implement a better sync endpoint than just rsync/ssh as setting up those connections repeatedly is very time consuming. A simple daemon to send/receive blocks that maybe even allows multi-server failover and redundancy would be nice. Or maybe something like the S3 protocol would fit.
   - Allow marking certain files/directories as allways available locally so you can set it on the thumbnail dir of a photo application and get fast browsing at all times
   - Expose a Time Machine like interface showing read-only snapshots of the filesytem (already present in the data but not exposed) 
