@@ -18,6 +18,12 @@ Proper versioning of the on-disk data
   - For the block size and hash size settings moving them into a config file in data and startup from there so that the constants in the code are just defaults
   - For the `FSEntry` versioning eventually we want to move into a magic few bytes at the start that identify the version and then just keep `FSEntryV1` and `FSEntryV2` structs around with implementations to turn them into the proper entry so that upgrades to the on-disk values are seamless
 
+Compressed Data
+---------------
+
+  - Compressing blobs that are large enough with a fast compressor might save quite a bit of space and bandwidth for very little CPU
+  - For this to work on-disk blobs should have a few magic bytes to indicate if they are compressed or not just like for on-disk structures they should indicate the version.
+
 Read-only slaves
 --------------------------
 
