@@ -23,7 +23,6 @@ pub type BlobHash = [u8;HASHSIZE];
 #[derive(Clone)]
 pub struct Blob {
   data: Vec<u8>,
-  hash: BlobHash,
 }
 
 impl Blob {
@@ -32,10 +31,8 @@ impl Blob {
   }
 
   pub fn new_with_data(data: Vec<u8>) -> Self {
-    let hash = Self::hash(&data);
     Self {
       data,
-      hash,
     }
   }
 
@@ -78,13 +75,12 @@ impl Blob {
     let end = offset+data.len();
     if end > self.data.len() { self.data.resize(end, 0) }
     self.data[start..end].copy_from_slice(&data[..]);
-    self.hash = Self::hash(&self.data);
-    self.hash
+    self.hash()
   }
 
-  fn hash(data: &[u8]) -> BlobHash {
+  fn hash(&self) -> BlobHash {
     let mut hasher = Blake2b::new(HASHSIZE).unwrap();
-    hasher.process(data);
+    hasher.process(&self.data);
     let mut buf = [0u8; HASHSIZE];
     hasher.variable_result(&mut buf).unwrap();
     buf
@@ -211,22 +207,23 @@ impl BlobStorage {
   }
 
   fn store_blob(&self, blob: Blob) -> Result<(), c_int> {
-    let file = self.local_path(&blob.hash);
+    let hash = blob.hash();
+    let file = self.local_path(&hash);
     try!(blob.store(&file));
     {
       let mut written_blobs = self.written_blobs.write().unwrap();
-      written_blobs.push((blob.hash, blob.data.len() as u64, timeval()));
+      written_blobs.push((hash, blob.data.len() as u64, timeval()));
     }
     Ok(())
   }
 
   pub fn zero(size: usize) -> BlobHash {
-    Blob::zero(size).hash
+    Blob::zero(size).hash()
   }
 
   pub fn add_blob(&self, data: &[u8]) -> Result<BlobHash, c_int> {
     let blob = Blob::new_with_data(data.to_vec());
-    let hash = blob.hash;
+    let hash = blob.hash();
     try!(self.store_blob(blob));
     Ok(hash)
   }
