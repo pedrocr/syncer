@@ -73,13 +73,13 @@ impl Blob {
     self.data[start..end].to_vec()
   }
 
-  fn write(&self, offset: usize, data: &[u8]) -> Blob {
+  fn write(&mut self, offset: usize, data: &[u8]) -> BlobHash {
     let start = offset;
     let end = offset+data.len();
-    let mut newdata = self.data.clone();
-    if end > newdata.len() { newdata.resize(end, 0) }
-    newdata[start..end].copy_from_slice(&data[..]);
-    Self::new_with_data(newdata)
+    if end > self.data.len() { self.data.resize(end, 0) }
+    self.data[start..end].copy_from_slice(&data[..]);
+    self.hash = Self::hash(&self.data);
+    self.hash
   }
 
   fn hash(data: &[u8]) -> BlobHash {
@@ -162,30 +162,25 @@ impl BlobStorage {
   }
 
   pub fn write(&self, node: u64, block: usize, hash: &BlobHash, offset: usize, data: &[u8], readahead: &[BlobHash]) -> Result<BlobHash, c_int> {
-    let new_blob = try!(self.create_new_blob(node, block, hash, offset, data, readahead));
-    let hash = new_blob.hash;
-
-    // Store the blob in the cache
-    let mut blob_cache = self.blob_cache.write().unwrap();
-    let blocks = blob_cache.entry(node).or_insert(HashMap::new());
-    blocks.insert(block, new_blob);
-
-    Ok(hash)
-  }
-
-  pub fn create_new_blob(&self, node: u64, block: usize, hash: &BlobHash, offset: usize, data: &[u8], readahead: &[BlobHash]) -> Result<Blob, c_int> {
     // First figure out if this isn't a cached blob
     {
-      let blob_cache = self.blob_cache.read().unwrap();
-      if let Some(blocks) = blob_cache.get(&node) {
-        if let Some(blob) = blocks.get(&block) {
+      let mut blob_cache = self.blob_cache.write().unwrap();
+      if let Some(blocks) = blob_cache.get_mut(&node) {
+        if let Some(mut blob) = blocks.get_mut(&block) {
           return Ok(blob.write(offset, data))
         }
       }
     }
 
-    let blob = try!(self.get_blob(hash, readahead));
-    Ok(blob.write(offset, data))
+    let mut blob = try!(self.get_blob(hash, readahead));
+    let hash = blob.write(offset, data);
+
+    // Store the blob in the cache
+    let mut blob_cache = self.blob_cache.write().unwrap();
+    let blocks = blob_cache.entry(node).or_insert(HashMap::new());
+    blocks.insert(block, blob);
+
+    Ok(hash)
   }
 
   pub fn sync_node(&self, node: u64) -> Result<(), c_int> {
