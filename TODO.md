@@ -1,4 +1,5 @@
 Normal bugs:
+ - Figure out why rsync is so slow at fetching files from the network
 
 Make metadata much less likely to be evicted
   - Listing directories should be generally faster than opening files. Right now since directories end up being small blobs this is particularly unfriendly as fetching a bunch of small blobs is very slow
