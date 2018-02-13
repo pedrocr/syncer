@@ -70,12 +70,11 @@ impl Blob {
     self.data[start..end].to_vec()
   }
 
-  fn write(&mut self, offset: usize, data: &[u8]) -> BlobHash {
+  fn write(&mut self, offset: usize, data: &[u8]) {
     let start = offset;
     let end = offset+data.len();
     if end > self.data.len() { self.data.resize(end, 0) }
     self.data[start..end].copy_from_slice(&data[..]);
-    self.hash()
   }
 
   fn hash(&self) -> BlobHash {
@@ -157,7 +156,7 @@ impl BlobStorage {
     Ok(blob.read(offset, bytes))
   }
 
-  pub fn write(&self, node: u64, block: usize, hash: &BlobHash, offset: usize, data: &[u8], readahead: &[BlobHash]) -> Result<BlobHash, c_int> {
+  pub fn write(&self, node: u64, block: usize, hash: &BlobHash, offset: usize, data: &[u8], readahead: &[BlobHash]) -> Result<(), c_int> {
     // First figure out if this isn't a cached blob
     {
       let mut blob_cache = self.blob_cache.write().unwrap();
@@ -179,14 +178,16 @@ impl BlobStorage {
     Ok(hash)
   }
 
-  pub fn sync_node(&self, node: u64) -> Result<(), c_int> {
+  pub fn sync_node(&self, node: u64) -> Result<Vec<(usize, BlobHash)>, c_int> {
+    let mut stored = Vec::new();
     let mut blob_cache = self.blob_cache.write().unwrap();
     if let Some(mut blocks) = blob_cache.remove(&node) {
-      for (_, blob) in blocks.drain() {
-        try!(self.store_blob(blob));
+      for (i, blob) in blocks.drain() {
+        let hash = try!(self.store_blob(blob));
+        stored.push((i, hash));
       }
     }
-    Ok(())
+    Ok(stored)
   }
 
   fn get_blob(&self, hash: &BlobHash, readahead: &[BlobHash]) -> Result<Blob, c_int> {
@@ -206,7 +207,7 @@ impl BlobStorage {
     }
   }
 
-  fn store_blob(&self, blob: Blob) -> Result<(), c_int> {
+  fn store_blob(&self, blob: Blob) -> Result<BlobHash, c_int> {
     let hash = blob.hash();
     let file = self.local_path(&hash);
     try!(blob.store(&file));
@@ -214,7 +215,7 @@ impl BlobStorage {
       let mut written_blobs = self.written_blobs.write().unwrap();
       written_blobs.push((hash, blob.data.len() as u64, timeval()));
     }
-    Ok(())
+    Ok(hash)
   }
 
   pub fn zero(size: usize) -> BlobHash {

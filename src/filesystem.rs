@@ -145,18 +145,14 @@ impl FSEntry {
     let startblock = start/BLKSIZE;
     let endblock = (end + BLKSIZE - 1)/BLKSIZE;
     for i in startblock..endblock {
-      let newblock = {
-        let block = &self.blocks[i];
-        let readahead = &self.blocks[i+1..cmp::min(i+READAHEAD, self.blocks.len())];
-        let bstart = cmp::max(start, i*BLKSIZE);
-        let bend = cmp::min(end, (i+1)*BLKSIZE);
-        let bsize = bend - bstart;
-        let boffset = bstart - i*BLKSIZE;
-        let nb = try!(bs.write(node, i, block, boffset, &data[written..written+bsize], readahead));
-        written += bsize;
-        nb
-      };
-      self.blocks[i].copy_from_slice(&newblock);
+      let block = &self.blocks[i];
+      let readahead = &self.blocks[i+1..cmp::min(i+READAHEAD, self.blocks.len())];
+      let bstart = cmp::max(start, i*BLKSIZE);
+      let bend = cmp::min(end, (i+1)*BLKSIZE);
+      let bsize = bend - bstart;
+      let boffset = bstart - i*BLKSIZE;
+      try!(bs.write(node, i, block, boffset, &data[written..written+bsize], readahead));
+      written += bsize;
     }
     assert!(written == data.len());
     self.mtime = self::time::get_time();
@@ -187,6 +183,10 @@ impl FSEntry {
     }
     assert!(written == data.len());
     Ok(data)
+  }
+
+  pub fn set_block(&mut self, i: usize, hash: BlobHash) {
+    self.blocks[i].copy_from_slice(&hash);
   }
 }
 
