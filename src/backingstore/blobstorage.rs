@@ -140,10 +140,10 @@ impl BlobStorage {
   }
 
   pub fn read_all(&self, hash: &BlobHash) -> Result<Vec<u8>, c_int> {
-    self.read(0, 0, hash, 0, usize::MAX, &[])
+    self.read(0, 0, hash, 0, usize::MAX)
   }
 
-  pub fn read(&self, node: u64, block: usize, hash: &BlobHash, offset: usize, bytes: usize, readahead: &[BlobHash]) -> Result<Vec<u8>, c_int> {
+  pub fn read(&self, node: u64, block: usize, hash: &BlobHash, offset: usize, bytes: usize) -> Result<Vec<u8>, c_int> {
     // First figure out if this isn't a cached blob
     let blob_cache = self.blob_cache.read().unwrap();
     if let Some(blocks) = blob_cache.get(&node) {
@@ -152,11 +152,11 @@ impl BlobStorage {
       }
     }
 
-    let blob = try!(self.get_blob(hash, readahead));
+    let blob = try!(self.get_blob(hash));
     Ok(blob.read(offset, bytes))
   }
 
-  pub fn write(&self, node: u64, block: usize, hash: &BlobHash, offset: usize, data: &[u8], readahead: &[BlobHash]) -> Result<(), c_int> {
+  pub fn write(&self, node: u64, block: usize, hash: &BlobHash, offset: usize, data: &[u8]) -> Result<(), c_int> {
     // First figure out if this isn't a cached blob
     {
       let mut blob_cache = self.blob_cache.write().unwrap();
@@ -167,7 +167,7 @@ impl BlobStorage {
       }
     }
 
-    let mut blob = try!(self.get_blob(hash, readahead));
+    let mut blob = try!(self.get_blob(hash));
     let hash = blob.write(offset, data);
 
     // Store the blob in the cache
@@ -190,17 +190,16 @@ impl BlobStorage {
     Ok(stored)
   }
 
-  fn get_blob(&self, hash: &BlobHash, readahead: &[BlobHash]) -> Result<Blob, c_int> {
+  fn get_blob(&self, hash: &BlobHash) -> Result<Blob, c_int> {
     {
       let mut touched = self.touched_blobs.write().unwrap();
       touched.insert(hash.clone(), timeval());
     }
     let file = self.local_path(hash);
     if !file.exists() {
-      try!(self.fetch_from_server(hash, readahead));
+      try!(self.fetch_from_server(hash));
       let blob = try!(Blob::load(&file));
       self.metadata.mark_deleted_blobs(&[hash.clone()], false);
-      self.metadata.mark_deleted_blobs(&readahead, false);
       Ok(blob)
     } else {
       Blob::load(&file)
@@ -264,14 +263,11 @@ impl BlobStorage {
     Err(libc::EIO)
   }
 
-  fn fetch_from_server(&self, hash: &BlobHash, readahead: &[BlobHash]) -> Result<(), c_int> {
+  fn fetch_from_server(&self, hash: &BlobHash) -> Result<(), c_int> {
     let remote = self.remote_path(hash);
     for _ in 0..10 {
       let mut cmd = self.connect_to_server();
       cmd.arg(&remote);
-      for hash in readahead {
-        cmd.arg(&self.remote_path(hash));
-      }
       cmd.arg(&self.source);
       match cmd.status() {
         Ok(_) => return Ok(()),

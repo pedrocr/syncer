@@ -146,12 +146,11 @@ impl FSEntry {
     let endblock = (end + BLKSIZE - 1)/BLKSIZE;
     for i in startblock..endblock {
       let block = &self.blocks[i];
-      let readahead = &self.blocks[i+1..cmp::min(i+READAHEAD, self.blocks.len())];
       let bstart = cmp::max(start, i*BLKSIZE);
       let bend = cmp::min(end, (i+1)*BLKSIZE);
       let bsize = bend - bstart;
       let boffset = bstart - i*BLKSIZE;
-      try!(bs.write(node, i, block, boffset, &data[written..written+bsize], readahead));
+      try!(bs.write(node, i, block, boffset, &data[written..written+bsize]));
       written += bsize;
     }
     assert!(written == data.len());
@@ -173,12 +172,11 @@ impl FSEntry {
     let endblock = (end + BLKSIZE - 1)/BLKSIZE;
     for i in startblock..endblock {
       let block = &self.blocks[i];
-      let readahead = &self.blocks[i+1..cmp::min(i+READAHEAD, self.blocks.len())];
       let bstart = cmp::max(start, i*BLKSIZE);
       let bend = cmp::min(end, (i+1)*BLKSIZE);
       let bsize = bend - bstart;
       let boffset = bstart - i*BLKSIZE;
-      data[written..written+bsize].copy_from_slice(&try!(bs.read(node, i, block, boffset, bsize, readahead)));
+      data[written..written+bsize].copy_from_slice(&try!(bs.read(node, i, block, boffset, bsize)));
       written += bsize;
     }
     assert!(written == data.len());

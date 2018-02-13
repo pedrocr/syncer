@@ -1,8 +1,5 @@
 // These are tunables that can be changed without much issue
 
-// How many blocks to read ahead of the current one when we fetch one from disk
-pub const READAHEAD: usize = 1;
-
 // How many blobs to fetch at once for upload
 pub const TO_UPLOAD: usize = 2;
 

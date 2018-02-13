@@ -78,12 +78,12 @@ impl BackingStore {
     }
   }
 
-  pub fn read(&self, node: u64, block: usize, hash: &BlobHash, offset: usize, bytes: usize, readahead: &[BlobHash]) -> Result<Vec<u8>, c_int> {
-    self.blobs.read(node, block, hash, offset, bytes, readahead)
+  pub fn read(&self, node: u64, block: usize, hash: &BlobHash, offset: usize, bytes: usize) -> Result<Vec<u8>, c_int> {
+    self.blobs.read(node, block, hash, offset, bytes)
   }
 
-  pub fn write(&self, node: u64, block: usize, hash: &BlobHash, offset: usize, data: &[u8], readahead: &[BlobHash]) -> Result<(), c_int> {
-    self.blobs.write(node, block, hash, offset, data, readahead)
+  pub fn write(&self, node: u64, block: usize, hash: &BlobHash, offset: usize, data: &[u8]) -> Result<(), c_int> {
+    self.blobs.write(node, block, hash, offset, data)
   }
 
   fn sync_one_node(&self, node: u64, mut entry: FSEntry) -> Result<(), c_int> {
