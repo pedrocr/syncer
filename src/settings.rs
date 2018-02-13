@@ -1,10 +1,10 @@
 // These are tunables that can be changed without much issue
 
 // How many blobs to fetch at once for upload
-pub const TO_UPLOAD: usize = 2;
+pub const TO_UPLOAD: usize = 4;
 
 // How many blobs to fetch at once for delete
-pub const TO_DELETE: usize = 10;
+pub const TO_DELETE: usize = 100;
 
 // From now on these can be changed but will make the on-disk format incompatible
 // Making them per-repository in the future may make sense for some
