@@ -6,6 +6,9 @@ pub const TO_UPLOAD: usize = 4;
 // How many blobs to fetch at once for delete
 pub const TO_DELETE: usize = 100;
 
+// How large of a file to never evict from local cache
+pub const KEEP_UP_TO_SIZE: usize = 65536;
+
 // From now on these can be changed but will make the on-disk format incompatible
 // Making them per-repository in the future may make sense for some
 
