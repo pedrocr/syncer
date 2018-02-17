@@ -65,7 +65,11 @@ pub struct FSEntry {
   ctime: Timespec,
   size: u64,
   blocks: Vec<BlobHash>,
-  children: HashMap<OsString, (u64, FileTypeDef)>,
+  children: HashMap<String, (u64, FileTypeDef)>,
+}
+
+fn from_os_str(ostr: &OsStr) -> Result<String, c_int> {
+  ostr.to_os_string().into_string().or_else(|_| Err(libc::EIO))
 }
 
 impl FSEntry {
@@ -115,19 +119,20 @@ impl FSEntry {
     out.push(DirectoryEntry{name: OsString::from(".."), kind: FileType::Directory});
     for (key, val) in self.children.iter() {
       out.push(DirectoryEntry{
-        name: key.clone(),
+        name: key.clone().into(),
         kind: val.1.to_filetype(),
       });
     }
     out
   }
 
-  fn add_child(&mut self, name: &OsStr, node: (u64, FileTypeDef)) {
-    self.children.insert(name.to_os_string(), node);
+  fn add_child(&mut self, name: &OsStr, node: (u64, FileTypeDef)) -> Result<(), c_int> {
+    self.children.insert(try!(from_os_str(name)), node);
+    Ok(())
   }
 
   fn remove_child(&mut self, name: &OsStr) -> Result<(u64, FileTypeDef), c_int> {
-    match self.children.remove(name) {
+    match self.children.remove(&try!(from_os_str(name))) {
       None => Err(libc::ENOENT),
       Some(c) => Ok(c),
     }
@@ -293,7 +298,7 @@ impl<'a> FS<'a> {
     iterator.next(); // Skip the root as that's already nodenum 0
     for elem in iterator {
       let node = try!(self.backing.get_node(nodenum));
-      match node.children.get(elem) {
+      match node.children.get(&try!(from_os_str(elem))) {
         None => return Err(libc::ENOENT),
         Some(&(num,_)) => nodenum = num,
       }
@@ -388,7 +393,7 @@ impl<'a> FilesystemMT for FS<'a> {
     };
     let newnode = try!(self.backing.create_node(entry));
     created_entry.fh = self.create_handle(Handle{node: newnode, _flags: flags,});
-    try!(self.modify_node(node, false, &(|parent, _| parent.add_child(name, (newnode, FileTypeDef::RegularFile)))));
+    try!(try!(self.modify_node(node, false, &(|parent, _| parent.add_child(name, (newnode, FileTypeDef::RegularFile))))));
     Ok(created_entry)
   }
 
@@ -403,7 +408,7 @@ impl<'a> FilesystemMT for FS<'a> {
     })));
     let created_dir = (entry.ctime, entry.attrs());
     let newnode = try!(self.backing.create_node(entry));
-    try!(self.modify_node(node, false, &(|parent, _| parent.add_child(name, (newnode, FileTypeDef::Directory)))));
+    try!(try!(self.modify_node(node, false, &(|parent, _| parent.add_child(name, (newnode, FileTypeDef::Directory))))));
     Ok(created_dir)
   }
 
@@ -422,7 +427,7 @@ impl<'a> FilesystemMT for FS<'a> {
     })));
     let created_symlink = (entry.ctime, entry.attrs());
     let newnode = try!(self.backing.create_node(entry));
-    try!(self.modify_node(node, false, &(|parent, _| parent.add_child(name, (newnode, FileTypeDef::Symlink)))));
+    try!(try!(self.modify_node(node, false, &(|parent, _| parent.add_child(name, (newnode, FileTypeDef::Symlink))))));
     Ok(created_symlink)
   }
 
@@ -432,7 +437,7 @@ impl<'a> FilesystemMT for FS<'a> {
     let childnodeinfo = try!(self.with_node(childnode, &(|entry, _| {
       ((entry.ctime, entry.attrs()), entry.filetype)
     })));
-    try!(self.modify_node(dirnode, false, &(|parent, _| parent.add_child(newname, (childnode, childnodeinfo.1)))));
+    try!(try!(self.modify_node(dirnode, false, &(|parent, _| parent.add_child(newname, (childnode, childnodeinfo.1))))));
     Ok(childnodeinfo.0)
   }
 
@@ -475,7 +480,7 @@ impl<'a> FilesystemMT for FS<'a> {
 
   fn rename(&self, _req: RequestInfo, parent: &Path, name: &OsStr, newparent: &Path, newname: &OsStr) -> ResultEmpty {
     let node = try!(try!(self.modify_path(parent, &(|parent, _| parent.remove_child(name)))));
-    try!(self.modify_path(newparent, &(|newparent, _| newparent.add_child(newname, node))));
+    try!(try!(self.modify_path(newparent, &(|newparent, _| newparent.add_child(newname, node)))));
     Ok(())
   }
 
