@@ -9,7 +9,7 @@ pub use self::blobstorage::BlobHash;
 use super::filesystem::FSEntry;
 use rwhashes::*;
 
-use self::bincode::{serialize, deserialize, Infinite};
+use self::bincode::{serialize, deserialize};
 use self::libc::c_int;
 use std::sync::Mutex;
 
@@ -55,7 +55,7 @@ impl BackingStore {
   }
 
   pub fn save_node(&self, node: u64, entry: FSEntry) -> Result<(), c_int> {
-    let encoded: Vec<u8> = serialize(&entry, Infinite).unwrap();
+    let encoded: Vec<u8> = serialize(&entry).unwrap();
     try!(self.blobs.add_node(node, &encoded));
     Ok(())
   }
