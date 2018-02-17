@@ -42,4 +42,3 @@ POSIX stuff
 
   - Implement fsync()
   - Implement statfs by just proxying the statfs of the underlying filesystem and some extra metadata from the extended (with remote data) filesystem
-  - Maybe consider extended attributes but probably not device files?

@@ -14,7 +14,7 @@ Current State
 
 The basic program works and syncs to a remote rsync/ssh server. This should be enough for a photo collection which is mostly a set of fixed files that don't get changed a lot. But this is still highly experimental and might eat your data. The basic existing features are:
 
-  - The standard POSIX filesystem works and persists to disk (tested on Linux, might work on OSX as well)
+  - The standard POSIX filesystem works and persists to disk (tested on Linux and OSX)
   - Pushing to the remote server and pulling on demand works as well
   - Speed is quite similar to direct to disk with more CPU usage (see the Performance section)
 
