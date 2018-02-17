@@ -66,6 +66,7 @@ pub struct FSEntry {
   size: u64,
   blocks: Vec<BlobHash>,
   children: HashMap<String, (u64, FileTypeDef)>,
+  xattrs: HashMap<String, Vec<u8>>,
 }
 
 fn from_os_str(ostr: &OsStr) -> Result<String, c_int> {
@@ -89,6 +90,7 @@ impl FSEntry {
       size: 0,
       blocks: Vec::new(),
       children: HashMap::new(),
+      xattrs: HashMap::new(),
     }
   }
 
@@ -495,6 +497,71 @@ impl<'a> FilesystemMT for FS<'a> {
       namelen: 4096,
       frsize: 4096,
     })
+  }
+
+  fn getxattr(&self, _req: RequestInfo, path: &Path, name: &OsStr, size: u32) -> ResultXattr {
+    try!(self.with_path(path, &|entry, _| {
+      let attrname = try!(from_os_str(name));
+      if let Some(value) = entry.xattrs.get(&attrname) {
+        if size == 0 {
+          Ok(Xattr::Size(value.len() as u32))
+        } else {
+          Ok(Xattr::Data(value.clone()))
+        }
+      } else {
+        Err(libc::ENOATTR)
+      }
+    }))
+  }
+
+  fn listxattr(&self, _req: RequestInfo, path: &Path, size: u32) -> ResultXattr {
+    try!(self.with_path(path, &|entry, _| {
+      let mut output = Vec::<u8>::new();
+      for name in entry.xattrs.keys() {
+        // NOTE: .as_bytes() is UNIX only
+        output.extend_from_slice(OsString::from(name).as_os_str().as_bytes());
+        output.push(0);
+      }
+
+      if size == 0 {
+        Ok(Xattr::Size(output.len() as u32))
+      } else if size < output.len() as u32 {
+        Err(libc::ERANGE)
+      } else {
+        Ok(Xattr::Data(output))
+      }
+    }))
+  }
+
+  fn setxattr(&self, _req: RequestInfo, path: &Path, name: &OsStr, value: &[u8], flags: u32, _position: u32) -> ResultEmpty {
+    try!(self.modify_path(path, &|entry, _| {
+      let attrname = try!(from_os_str(name));
+
+      let has_flag = |flag| (flags as i32 & flag) != 0;
+      match (has_flag(libc::XATTR_CREATE), has_flag(libc::XATTR_REPLACE)) {
+        (false, false) => {},
+        (false, true) => if !entry.xattrs.contains_key(&attrname) {
+          return Err(libc::ENOATTR);
+        },
+        (true, false) => if entry.xattrs.contains_key(&attrname) {
+          return Err(libc::EEXIST);
+        },
+        (true, true) => return Err(libc::EINVAL),
+      };
+
+      entry.xattrs.insert(attrname, value.to_vec());
+      Ok(())
+    }))
+  }
+
+  fn removexattr(&self, _req: RequestInfo, path: &Path, name: &OsStr) -> ResultEmpty {
+    try!(self.modify_path(path, &|entry, _| {
+      let attrname = try!(from_os_str(name));
+      match entry.xattrs.remove(&attrname) {
+        Some(_) => Ok(()),
+        None => Err(libc::ENOATTR),
+      }
+    }))
   }
 }
 
