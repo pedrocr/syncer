@@ -63,6 +63,12 @@ pub struct FSEntry {
   mtime: Timespec,
   #[serde(with = "TimespecDef")]
   ctime: Timespec,
+  #[serde(with = "TimespecDef")]
+  crtime: Timespec,
+  #[serde(with = "TimespecDef")]
+  chgtime: Timespec,
+  #[serde(with = "TimespecDef")]
+  bkuptime: Timespec,
   size: u64,
   blocks: Vec<BlobHash>,
   children: HashMap<String, (u64, FileTypeDef)>,
@@ -87,6 +93,9 @@ impl FSEntry {
       atime: time,
       mtime: time,
       ctime: time,
+      crtime: time,
+      chgtime: time,
+      bkuptime: time,
       size: 0,
       blocks: Vec::new(),
       children: HashMap::new(),
@@ -103,7 +112,7 @@ impl FSEntry {
       atime: self.atime,
       mtime: self.mtime,
       ctime: self.ctime,
-      crtime: self.ctime,
+      crtime: self.crtime,
       kind: self.filetype.to_filetype(),
       perm: self.perm as u16,
       nlink: 1,
@@ -375,6 +384,14 @@ impl<'a> FilesystemMT for FS<'a> {
     self.modify_path_optional_handle(path, fh, &(|entry, _| {
       if let Some(atime) = atime {entry.atime = atime};
       if let Some(mtime) = mtime {entry.mtime = mtime};
+    }))
+  }
+
+  fn utimens_macos(&self, _req: RequestInfo, path: &Path, fh: Option<u64>, crtime: Option<Timespec>, chgtime: Option<Timespec>, bkuptime: Option<Timespec>, _flags: Option<u32>) -> ResultEmpty {
+    self.modify_path_optional_handle(path, fh, &(|entry, _| {
+      if let Some(crtime) = crtime {entry.crtime = crtime};
+      if let Some(chgtime) = chgtime {entry.chgtime = chgtime};
+      if let Some(bkuptime) = bkuptime {entry.bkuptime = bkuptime};
     }))
   }
 
