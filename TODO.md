@@ -2,7 +2,6 @@ Normal bugs
 -----------
 
   - Make sure that `touch()` will create the blob in the database if it doesn't exist in case we crash after having written to disk but before having written to the database
-  - `destroy()` needs to be implemented and call `sync_all()` so that we don't lose data from open file descriptors not yet synced to disk
 
 Proper readahead
 ----------------

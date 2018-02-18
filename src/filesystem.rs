@@ -342,6 +342,13 @@ impl<'a> FilesystemMT for FS<'a> {
     Ok(())
   }
 
+  fn destroy(&self, _req: RequestInfo) {
+    match self.backing.sync_all() {
+      Err(_) => eprintln!("ERROR: couldn't save on shutdown, data may have been lost"),
+      _ => {},
+    };
+  }
+
   fn open(&self, _req: RequestInfo, path: &Path, flags: u32) -> ResultOpen {
     let node = try!(self.find_node(path));
     let handle = self.create_handle(Handle{node: node, _flags: flags,});
