@@ -140,6 +140,19 @@ impl BlobStorage {
     remote
   }
 
+  pub fn fsync_file(&self, hash: &BlobHash) -> Result<(), c_int> {
+    let path = self.local_path(hash);
+    let file = match fs::File::open(&path) {
+      Ok(f) => f,
+      Err(_) => return Err(libc::EIO),
+    };
+    match file.sync_all() {
+      Ok(_) => {},
+      Err(_) => return Err(libc::EIO),
+    }
+    Ok(())
+  }
+
   pub fn read(&self, node: u64, block: usize, hash: &BlobHash, offset: usize, bytes: usize) -> Result<Vec<u8>, c_int> {
     // First figure out if this isn't a cached blob
     let blob_cache = self.blob_cache.read(node);
@@ -235,10 +248,10 @@ impl BlobStorage {
     Ok(hash)
   }
 
-  pub fn read_node(&self, node: u64) -> Result<Vec<u8>, c_int> {
+  pub fn read_node(&self, node: u64) -> Result<(BlobHash, Vec<u8>), c_int> {
     let hash = try!(self.metadata.get_node(node));
     let blob = try!(self.get_blob(&hash));
-    Ok(blob.read(0, usize::MAX))
+    Ok((hash, blob.read(0, usize::MAX)))
   }
 
   pub fn node_exists(&self, node: u64) -> Result<bool, c_int> {

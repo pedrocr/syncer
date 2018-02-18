@@ -72,10 +72,15 @@ impl BackingStore {
       Some(n) => Ok((*n).clone()),
       None => {
         // We're in the slow path where we actually need to fetch stuff from disk
-        let buffer = try!(self.blobs.read_node(node));
-        Ok(deserialize(&buffer[..]).unwrap())
+        let (_, entry) = try!(self.fetch_node(node));
+        Ok(entry)
       },
     }
+  }
+
+  pub fn fetch_node(&self, node: u64) -> Result<(BlobHash, FSEntry), c_int> {
+    let (hash, buffer) = try!(self.blobs.read_node(node));
+    Ok((hash, deserialize(&buffer[..]).unwrap()))
   }
 
   pub fn node_exists(&self, node: u64) -> Result<bool, c_int> {
@@ -119,6 +124,15 @@ impl BackingStore {
       }
     }
     self.blobs.do_save();
+    Ok(())
+  }
+
+  pub fn fsync_node(&self, node: u64) -> Result<(), c_int> {
+    let (hash, entry) = try!(self.fetch_node(node));
+    try!(self.blobs.fsync_file(&hash));
+    for hash in entry.get_blocks() {
+      try!(self.blobs.fsync_file(&hash));
+    }
     Ok(())
   }
 

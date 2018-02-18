@@ -40,5 +40,4 @@ Read-only mount of a previous state of the filesystem
 POSIX stuff
 -----------
 
-  - Implement fsync()
   - Implement statfs by just proxying the statfs of the underlying filesystem and some extra metadata from the extended (with remote data) filesystem

@@ -203,6 +203,10 @@ impl FSEntry {
   pub fn set_block(&mut self, i: usize, hash: BlobHash) {
     self.blocks[i].copy_from_slice(&hash);
   }
+
+  pub fn get_blocks(&self) -> &Vec<BlobHash> {
+    &self.blocks
+  }
 }
 
 struct Handle {
@@ -586,6 +590,18 @@ impl<'a> FilesystemMT for FS<'a> {
         None => Err(libc::ENOATTR),
       }
     }))
+  }
+
+  fn fsync(&self, _req: RequestInfo, _path: &Path, fh: u64, _datasync: bool) -> ResultEmpty {
+    try!(self.with_handle(fh, &(|_, node| {
+      try!(self.backing.sync_node(node));
+      try!(self.backing.fsync_node(node));
+      Ok(())
+    })))
+  }
+
+  fn fsyncdir(&self, req: RequestInfo, path: &Path, fh: u64, datasync: bool) -> ResultEmpty {
+    self.fsync(req, path, fh, datasync)
   }
 }
 
