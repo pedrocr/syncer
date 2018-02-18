@@ -24,16 +24,21 @@ Compressed Data
   - Compressing blobs that are large enough with a fast compressor might save quite a bit of space and bandwidth for very little CPU
   - For this to work on-disk blobs should have a few magic bytes to indicate if they are compressed or not just like for on-disk structures they should indicate the version.
 
-Read-only slaves
---------------------------
+Multi-master read/write
+-----------------------
 
-  - For some users the opposite use case to mine is the relevant one. They have a very large machine in which they do all their work and holds all files. Then they have the laptop where occasionally they will want to view a file from their collection. Having the laptop be read-only would already deliver value but read/write would also be great.
-  - For the simple read-only case have the master continuously write an append only file with the values of the `nodes` table. Continuously push those values (with `rsync --append`) to the remote (which in the case of a large machine is probably just another dir on the machine).
-  - On the satelite continuously pull the file (also with `rsync --append`) and keep an indication of how much of the file has been processed. In a thread continuously process new entries in the file by inserting them into the actual `nodes` table. Ideally also add a `size` field to the append only file so the 64kB files can be paged in as needed (just keep a temp table for that and insert into it on insert to `nodes` whenever the size is small enough)
-  - Proper read/write slaves will require full sync setup with vector clocks and other mechanics. At that point each node just becomes a full node with more or less space limitations.
+  - syncer would be most useful if you could just do multi-master read/write so you could use to sync between several machines. It may be possible to do it with the rsync setup intact
+  - Have each machine have an ID (a random 64bit number will not collide so that should work)
+  - New nodes get a 128bit number as key that has the sequential 64bit number as now and the machine ID attached (so that new node creation doesn't require synchronization)
+  - The `nodes` table includes a new column with a vector clock that gets initialized with just the originating machine's ID and 1
+  - Whenever a node is updated bump the vector clock for whatever machine you are
+  - Push all node changes to an ID named file on the server (with `rsync --append`) but only do it after pushing all the blobs that are referred by the node (so that another machine doesn't end up fetching a node for which there is no content yet and having an inconsistent state)
+  - Fetch all node changes from other ID's by running rsync in the other direction as well
+  - Process all new nodes, if the vector clock says all is in order just add them to the filesystem if not do the merge between nodes. Some parts of `FSEntry` can be merged (`children` and `xattrs` mostly), for everything else just have a stable rule on who wins (maybe the machine with the highest ID)
+  - This should give you a read-write filesystem where all machines arrive on the same current state without intelligence in the central server (ideal for a NAS). It may result in some weirdness with files though (e.g., hard-linked directories) and I haven't thought about all those possible implications
 
 Read-only mount of a previous state of the filesystem
------------------------------------------------------------------
+-----------------------------------------------------
 
   - Since we don't evict data and keep the historical node->hash relationships the filesystem can be mounted at any point in time just by limiting `MetadataDB::get_node()` to a given moment in time
 
