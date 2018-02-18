@@ -37,6 +37,7 @@ Multi-master read/write
   - Process all new nodes, if the vector clock says all is in order just add them to the filesystem if not do the merge between nodes. Some parts of `FSEntry` can be merged (`children` and `xattrs` mostly), for everything else just have a stable rule on who wins (maybe the machine with the highest ID)
   - This should give you a read-write filesystem where all machines arrive on the same current state without intelligence in the central server (ideal for a NAS). It may result in some weirdness with files though (e.g., hard-linked directories) and I haven't thought about all those possible implications
     - To fix the hard-link problem a solution would be to never reuse IDs on rename(), instead always create a new ID that points to the same hash. That way if machine A does `rename("foo/", "bar/")` and machine B does `rename("foo/", "baz/")` they get two different directories with the same content. The problem with this is that a deep copy is needed, refreshing ID's for all subdirectories as well. IDs are cheap though as the actual data is left unchanged.
+    - To avoid having a higher-ID machine be offline for a long time and when it comes back rewriting the filesystem with old data, having the date of the change be the deciding factor for breaking ties is probably a better idea.
 
 Read-only mount of a previous state of the filesystem
 -----------------------------------------------------
