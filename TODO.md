@@ -29,15 +29,13 @@ Multi-master read/write
 
   - syncer would be most useful if you could just do multi-master read/write so you could use to sync between several machines. It may be possible to do it with the rsync setup intact
   - Have each machine have an ID (a random 64bit number will not collide so that should work)
-  - New nodes get a 128bit number as key that has the sequential 64bit number as now and the machine ID attached (so that new node creation doesn't require synchronization)
+  - New nodes get a 128bit number as key composed of the current sequential 64bit number as high bits and the machine ID as low bits so that new node creation doesn't require synchronization. To initialize the count just take the highest number from the DB like now and shift it 64bits right
   - The `nodes` table includes a new column with a vector clock that gets initialized with just the originating machine's ID and 1
   - Whenever a node is updated bump the vector clock for whatever machine you are
   - Push all node changes to an ID named file on the server (with `rsync --append`) but only do it after pushing all the blobs that are referred by the node (so that another machine doesn't end up fetching a node for which there is no content yet and having an inconsistent state)
   - Fetch all node changes from other ID's by running rsync in the other direction as well
-  - Process all new nodes, if the vector clock says all is in order just add them to the filesystem if not do the merge between nodes. Some parts of `FSEntry` can be merged (`children` and `xattrs` mostly), for everything else just have a stable rule on who wins (maybe the machine with the highest ID)
-  - This should give you a read-write filesystem where all machines arrive on the same current state without intelligence in the central server (ideal for a NAS). It may result in some weirdness with files though (e.g., hard-linked directories) and I haven't thought about all those possible implications
-    - To fix the hard-link problem a solution would be to never reuse IDs on rename(), instead always create a new ID that points to the same hash. That way if machine A does `rename("foo/", "bar/")` and machine B does `rename("foo/", "baz/")` they get two different directories with the same content. The problem with this is that a deep copy is needed, refreshing ID's for all subdirectories as well. IDs are cheap though as the actual data is left unchanged.
-    - To avoid having a higher-ID machine be offline for a long time and when it comes back rewriting the filesystem with old data, having the date of the change be the deciding factor for breaking ties is probably a better idea.
+  - Process all new nodes. If the vector clock says all is in order just add them to the filesystem. If the vector clock signals a conflict do a three way merge by going back to the latest entry that is shared between the current on-disk node and the new one. For the cases where an actual conflict exists (both changed the same value) pick the one with the highest timestamp and if all else fails the machine with the highest ID. For `children`, `xattrs` and `blocks` a proper three way merge is also possible.
+  - To handle renames properly disallow hardlinks in the filesystem and add a parent field to the `nodes` table. Whenever a new node gets written from a sync iterate all its child nodes (files or directories) and if the parent node in the database is not the same and still has it as a child remove it.
 
 Read-only mount of a previous state of the filesystem
 -----------------------------------------------------
