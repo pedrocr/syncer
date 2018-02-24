@@ -1,6 +1,6 @@
 [package]
 name = "syncer"
-version = "0.2.1"
+version = "0.3.0"
 authors = ["Pedro Côrte-Real <pedro@pedrocr.net>"]
 description = "A filesystem that pretends you have all your files locally while caching only the most recently used"
 repository = "https://github.com/pedrocr/syncer"
