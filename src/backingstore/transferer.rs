@@ -1,8 +1,10 @@
 extern crate hex;
 extern crate libc;
+extern crate crossbeam;
 
 use super::blobstorage::*;
 use rwhashes::*;
+use settings::*;
 
 use std::path::PathBuf;
 use std::process::Command;
@@ -62,6 +64,26 @@ impl Transferer {
     Err(libc::EIO)
   }
 
+  pub fn readahead_from_server<'a>(&'a self, hashes: &[BlobHash]) {
+    for hash in hashes {
+      if hash != &HASHZERO && !self.local_path(hash).exists() {
+        let hash = hash.clone();
+        unsafe{crossbeam::spawn_unsafe(move || {
+          let mut ongoing = self.ongoing.write(&hash);
+          if !ongoing.contains_key(&hash) {
+            let mutex = Arc::new(Mutex::new(false));
+            let mut res = mutex.lock().unwrap();
+            ongoing.insert(hash.clone(), mutex.clone());
+            drop(ongoing);
+            *res = self.real_fetch_from_server(&hash);
+            let mut ongoing = self.ongoing.write(&hash); // Grab the lock again
+            ongoing.remove(&hash); // Remove from the hash as it's already done now
+          }
+        });}
+      }
+    }
+  }
+
   pub fn fetch_from_server(&self, hash: &BlobHash) -> Result<(), c_int> {
     let mutex = {
       let mut ongoing = self.ongoing.write(hash);
@@ -104,7 +126,9 @@ impl Transferer {
     let mut cmd = Command::new("rsync");
     cmd.arg("--quiet");
     cmd.arg("--timeout=5");
-    cmd.arg("--append");
+    // --whole-file is needed instead of --append because otherwise concurrent usage while
+    // doing readhead causes short blocks
+    cmd.arg("--whole-file");
     cmd
   }
 }

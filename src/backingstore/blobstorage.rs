@@ -134,7 +134,7 @@ impl BlobStorage {
     Ok(())
   }
 
-  pub fn read(&self, node: u64, block: usize, hash: &BlobHash, offset: usize, bytes: usize) -> Result<Vec<u8>, c_int> {
+  pub fn read(&self, node: u64, block: usize, hash: &BlobHash, offset: usize, bytes: usize, readahead: &[BlobHash]) -> Result<Vec<u8>, c_int> {
     // First figure out if this isn't a cached blob
     let blob_cache = self.blob_cache.read(&node);
     if let Some(blocks) = blob_cache.get(&node) {
@@ -143,11 +143,11 @@ impl BlobStorage {
       }
     }
 
-    let blob = try!(self.get_blob(hash));
+    let blob = try!(self.get_blob(hash, readahead));
     Ok(blob.read(offset, bytes))
   }
 
-  pub fn write(&self, node: u64, block: usize, hash: &BlobHash, offset: usize, data: &[u8]) -> Result<(), c_int> {
+  pub fn write(&self, node: u64, block: usize, hash: &BlobHash, offset: usize, data: &[u8], readahead: &[BlobHash]) -> Result<(), c_int> {
     // First figure out if this isn't a cached blob
     {
       let mut blob_cache = self.blob_cache.write(&node);
@@ -158,7 +158,7 @@ impl BlobStorage {
       }
     }
 
-    let mut blob = try!(self.get_blob(hash));
+    let mut blob = try!(self.get_blob(hash, readahead));
     let hash = blob.write(offset, data);
 
     // Store the blob in the cache
@@ -181,13 +181,14 @@ impl BlobStorage {
     Ok(stored)
   }
 
-  fn get_blob(&self, hash: &BlobHash) -> Result<Blob, c_int> {
+  fn get_blob(&self, hash: &BlobHash, readahead: &[BlobHash]) -> Result<Blob, c_int> {
     {
       let mut touched = self.touched_blobs.write().unwrap();
       touched.insert(hash.clone(), timeval());
     }
     let file = self.transferer.local_path(hash);
     if !file.exists() {
+      self.transferer.readahead_from_server(readahead);
       try!(self.transferer.fetch_from_server(hash));
       let blob = try!(Blob::load(&file));
       self.metadata.mark_deleted_blobs(&[hash.clone()], false);
@@ -231,7 +232,7 @@ impl BlobStorage {
 
   pub fn read_node(&self, node: u64) -> Result<(BlobHash, Vec<u8>), c_int> {
     let hash = try!(self.metadata.get_node(node));
-    let blob = try!(self.get_blob(&hash));
+    let blob = try!(self.get_blob(&hash, &[]));
     Ok((hash, blob.read(0, usize::MAX)))
   }
 
