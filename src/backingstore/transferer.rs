@@ -86,8 +86,6 @@ impl Transferer {
   }
 
   fn real_fetch_from_server(&self, hash: &BlobHash) -> bool {
-    eprintln!("Fetching from server {}", hex::encode(hash));
-
     let remote = self.remote_path(hash);
     for _ in 0..10 {
       let mut cmd = self.connect_to_server();
