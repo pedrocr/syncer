@@ -183,15 +183,18 @@ impl BlobStorage {
 
   fn get_blob(&self, hash: &BlobHash, readahead: &[BlobHash]) -> Result<Blob, c_int> {
     {
+      let timeval = timeval();
       let mut touched = self.touched_blobs.write().unwrap();
-      touched.insert(hash.clone(), timeval());
+      touched.insert(hash.clone(), timeval);
+      for hash in readahead {
+        touched.insert(hash.clone(), timeval);
+      }
     }
     let file = self.transferer.local_path(hash);
     if !file.exists() {
       self.transferer.readahead_from_server(readahead);
       try!(self.transferer.fetch_from_server(hash));
       let blob = try!(Blob::load(&file));
-      self.metadata.mark_deleted_blobs(&[hash.clone()], false);
       Ok(blob)
     } else {
       Blob::load(&file)

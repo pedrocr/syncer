@@ -153,7 +153,7 @@ impl MetadataDB {
     let tran = conn.transaction().unwrap();
     for (hash, time) in vals {
       dberror_test!(tran.execute(
-        "UPDATE OR IGNORE blobs SET last_use = ?2 WHERE hash = ?1",
+        "UPDATE OR IGNORE blobs SET last_use = ?2, present = 1 WHERE hash = ?1",
          &[&(hex::encode(hash)), &time]));
     }
     tran.commit().unwrap();
@@ -339,5 +339,21 @@ mod tests {
     assert_eq!(10, db.localbytes());
     db.mark_deleted_blobs(&[from_hash2], false);
     assert_eq!(30, db.localbytes());
+  }
+
+  #[test]
+  fn touch_marks_local() {
+    let conn = Connection::open_in_memory().unwrap();
+    let db = MetadataDB::new(conn);
+    let from_hash = [0;HASHSIZE];
+    let from_size = 10;
+    assert_eq!(0, db.localbytes());
+    db.set_blob(&from_hash, from_size);
+    assert_eq!(10, db.localbytes());
+    db.mark_deleted_blobs(&[from_hash], true);
+    assert_eq!(0, db.localbytes());
+    let mut vals = vec![(from_hash, timeval())];
+    db.touch_blobs(vals.drain(..));
+    assert_eq!(10, db.localbytes());
   }
 }
