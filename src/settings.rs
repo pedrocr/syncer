@@ -10,7 +10,7 @@ pub const TO_DELETE: usize = 100;
 pub const KEEP_UP_TO_SIZE: usize = 65536;
 
 // How many blocks to read ahead when we've already read one
-pub const READAHEAD: usize = 5;
+pub const READAHEAD: usize = 3;
 
 // From now on these can be changed but will make the on-disk format incompatible
 // Making them per-repository in the future may make sense for some
