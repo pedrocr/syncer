@@ -255,7 +255,7 @@ impl<'a> FS<'a> {
   fn with_handle<F,T>(&self, handle: u64, closure: &F) -> Result<T, c_int>
     where F : Fn(&FSEntry, u64) -> T {
     let node = {
-      let handles = self.handles.read(handle);
+      let handles = self.handles.read(&handle);
       match handles.get(&handle) {
         Some(h) => h.node,
         None => return Err(libc::EBADF),
@@ -286,7 +286,7 @@ impl<'a> FS<'a> {
   fn modify_handle<F,T>(&self, handle: u64, cache: bool, closure: &F) -> Result<T, c_int>
     where F : Fn(&mut FSEntry, u64) -> T {
     let node = {
-      let handles = self.handles.read(handle);
+      let handles = self.handles.read(&handle);
       match handles.get(&handle) {
         Some(h) => h.node,
         None => return Err(libc::EBADF),
@@ -327,13 +327,13 @@ impl<'a> FS<'a> {
       *counter += 1;
       *counter
     };
-    let mut handles = self.handles.write(count);
+    let mut handles = self.handles.write(&count);
     handles.insert(count, handle);
     count
   }
 
   fn delete_handle(&self, handle: u64) -> Result<(), c_int> {
-    let mut handles = self.handles.write(handle);
+    let mut handles = self.handles.write(&handle);
     if let Some(handle) = handles.remove(&handle) {
       try!(self.backing.sync_node(handle.node));
     }

@@ -136,7 +136,7 @@ impl BlobStorage {
 
   pub fn read(&self, node: u64, block: usize, hash: &BlobHash, offset: usize, bytes: usize) -> Result<Vec<u8>, c_int> {
     // First figure out if this isn't a cached blob
-    let blob_cache = self.blob_cache.read(node);
+    let blob_cache = self.blob_cache.read(&node);
     if let Some(blocks) = blob_cache.get(&node) {
       if let Some(blob) = blocks.get(&block) {
         return Ok(blob.read(offset, bytes))
@@ -150,7 +150,7 @@ impl BlobStorage {
   pub fn write(&self, node: u64, block: usize, hash: &BlobHash, offset: usize, data: &[u8]) -> Result<(), c_int> {
     // First figure out if this isn't a cached blob
     {
-      let mut blob_cache = self.blob_cache.write(node);
+      let mut blob_cache = self.blob_cache.write(&node);
       if let Some(blocks) = blob_cache.get_mut(&node) {
         if let Some(mut blob) = blocks.get_mut(&block) {
           return Ok(blob.write(offset, data))
@@ -162,7 +162,7 @@ impl BlobStorage {
     let hash = blob.write(offset, data);
 
     // Store the blob in the cache
-    let mut blob_cache = self.blob_cache.write(node);
+    let mut blob_cache = self.blob_cache.write(&node);
     let blocks = blob_cache.entry(node).or_insert(HashMap::new());
     blocks.insert(block, blob);
 
@@ -171,7 +171,7 @@ impl BlobStorage {
 
   pub fn sync_node(&self, node: u64) -> Result<Vec<(usize, BlobHash)>, c_int> {
     let mut stored = Vec::new();
-    let mut blob_cache = self.blob_cache.write(node);
+    let mut blob_cache = self.blob_cache.write(&node);
     if let Some(mut blocks) = blob_cache.remove(&node) {
       for (i, blob) in blocks.drain() {
         let hash = try!(self.store_blob(blob));

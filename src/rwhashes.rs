@@ -24,17 +24,17 @@ impl<K: Hash + Eq,V> RwHashes<K,V> {
     }
   }
 
-  fn get_bucket(&self, key: K) -> usize {
+  fn get_bucket(&self, key: &K) -> usize {
     let mut s = DefaultHasher::new();
     key.hash(&mut s);
     (s.finish() & self.mask) as usize
   }
 
-  pub fn read(&self, key: K) -> RwLockReadGuard<HashMap<K,V>> {
+  pub fn read(&self, key: &K) -> RwLockReadGuard<HashMap<K,V>> {
     self.buckets[self.get_bucket(key)].read().unwrap()
   }
 
-  pub fn write(&self, key: K) -> RwLockWriteGuard<HashMap<K,V>> {
+  pub fn write(&self, key: &K) -> RwLockWriteGuard<HashMap<K,V>> {
     self.buckets[self.get_bucket(key)].write().unwrap()
   }
 

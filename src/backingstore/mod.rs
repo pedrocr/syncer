@@ -62,13 +62,13 @@ impl BackingStore {
   }
 
   pub fn save_node_cached(&self, node: u64, entry: FSEntry) -> Result<(), c_int> {
-    let mut nodes = self.node_cache.write(node);
+    let mut nodes = self.node_cache.write(&node);
     nodes.insert(node, entry);
     Ok(())
   }
 
   pub fn get_node(&self, node: u64) -> Result<FSEntry, c_int> {
-    let nodes = self.node_cache.read(node);
+    let nodes = self.node_cache.read(&node);
     match nodes.get(&node) {
       Some(n) => Ok((*n).clone()),
       None => {
@@ -85,7 +85,7 @@ impl BackingStore {
   }
 
   pub fn node_exists(&self, node: u64) -> Result<bool, c_int> {
-    let nodes = self.node_cache.read(node);
+    let nodes = self.node_cache.read(&node);
     Ok(match nodes.get(&node) {
       Some(_) => true,
       None => try!(self.blobs.node_exists(node)),
@@ -109,7 +109,7 @@ impl BackingStore {
   }
 
   pub fn sync_node(&self, node: u64) -> Result<(), c_int> {
-    let mut nodes = self.node_cache.write(node);
+    let mut nodes = self.node_cache.write(&node);
     if let Some(entry) = nodes.remove(&node) {
       try!(self.sync_one_node(node, entry));
     }
