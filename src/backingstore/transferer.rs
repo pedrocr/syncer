@@ -1,14 +1,18 @@
 extern crate hex;
 extern crate libc;
+
 use super::blobstorage::*;
+use rwhashes::*;
 
 use std::path::PathBuf;
 use std::process::Command;
+use std::sync::{Arc, Mutex};
 use self::libc::c_int;
 
 pub struct Transferer {
   source: PathBuf,
   server: String,
+  ongoing: RwHashes<BlobHash, Arc<Mutex<bool>>>,
 }
 
 impl Transferer {
@@ -16,6 +20,7 @@ impl Transferer {
     Self {
       source,
       server,
+      ongoing: RwHashes::new(8),
     }
   }
 
@@ -58,18 +63,43 @@ impl Transferer {
   }
 
   pub fn fetch_from_server(&self, hash: &BlobHash) -> Result<(), c_int> {
+    let mutex = {
+      let mut ongoing = self.ongoing.write(hash);
+      if ongoing.contains_key(hash) {
+        // Another thread has started this fetch, just return the lock for it to wait on it
+        ongoing.get(hash).unwrap().clone()
+      } else {
+        // We're doing it live ourselves
+        let mutex = Arc::new(Mutex::new(false));
+        let mut res = mutex.lock().unwrap();
+        ongoing.insert(hash.clone(), mutex.clone());
+        drop(ongoing); // Don't hold the lock so other threads can now fetch stuff
+        *res = self.real_fetch_from_server(hash);
+        let mut ongoing = self.ongoing.write(hash); // Grab the lock again
+        ongoing.remove(hash); // Remove from the hash as it's already done now
+        return if *res {Ok(())} else {Err(libc::EIO)}
+      }
+    };
+
+    let res = mutex.lock().unwrap();
+    if *res {Ok(())} else {Err(libc::EIO)}
+  }
+
+  fn real_fetch_from_server(&self, hash: &BlobHash) -> bool {
+    eprintln!("Fetching from server {}", hex::encode(hash));
+
     let remote = self.remote_path(hash);
     for _ in 0..10 {
       let mut cmd = self.connect_to_server();
       cmd.arg(&remote);
       cmd.arg(&self.source);
       match cmd.status() {
-        Ok(_) => return Ok(()),
+        Ok(_) => return true,
         Err(_) => {},
       }
     }
     eprintln!("Failed to get block from server");
-    Err(libc::EIO)
+    false
   }
 
   fn connect_to_server(&self) -> Command {
