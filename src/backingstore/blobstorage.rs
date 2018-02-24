@@ -187,7 +187,9 @@ impl BlobStorage {
       let mut touched = self.touched_blobs.write().unwrap();
       touched.insert(hash.clone(), timeval);
       for hash in readahead {
-        touched.insert(hash.clone(), timeval);
+        if hash != &HASHZERO {
+          touched.insert(hash.clone(), timeval);
+        }
       }
     }
     let file = self.transferer.local_path(hash);
