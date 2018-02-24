@@ -4,6 +4,7 @@ extern crate hex;
 extern crate libc;
 
 use super::metadatadb::*;
+use super::transferer::*;
 use settings::*;
 use rwhashes::*;
 use self::rusqlite::Connection;
@@ -15,7 +16,6 @@ use std::path::{Path, PathBuf};
 use std::fs;
 use std::io::prelude::*;
 use std::usize;
-use std::process::Command;
 use std::collections::HashMap;
 use std::sync::RwLock;
 
@@ -89,8 +89,7 @@ impl Blob {
 
 pub struct BlobStorage {
   maxbytes: u64,
-  source: PathBuf,
-  server: String,
+  transferer: Transferer,
   metadata: MetadataDB,
   written_blobs: RwLock<Vec<(BlobHash, u64, i64)>>,
   touched_blobs: RwLock<HashMap<BlobHash,i64>>,
@@ -114,8 +113,7 @@ impl BlobStorage {
 
     Ok(BlobStorage {
       maxbytes,
-      source: path,
-      server: server.to_string(),
+      transferer: Transferer::new(path, server.to_string()),
       metadata: meta,
       written_blobs: RwLock::new(Vec::new()),
       touched_blobs: RwLock::new(HashMap::new()),
@@ -123,25 +121,8 @@ impl BlobStorage {
     })
   }
 
-  fn local_path(&self, hash: &BlobHash) -> PathBuf {
-    // As far as I can tell from online references there's no penalty in ext4 for
-    // random lookup in a directory with lots of files. So just store all the hashed
-    // files in a straight directory with no fanout to not waste space with directory
-    // entries. Just doing a 12bit fanout (4096 directories) wastes 17MB on ext4.
-    let mut path = self.source.clone();
-    path.push(hex::encode(hash));
-    path
-  }
-
-  fn remote_path(&self, hash: &BlobHash) -> String {
-    let mut remote = self.server.clone();
-    remote.push_str(&"/");
-    remote.push_str(&hex::encode(hash));
-    remote
-  }
-
   pub fn fsync_file(&self, hash: &BlobHash) -> Result<(), c_int> {
-    let path = self.local_path(hash);
+    let path = self.transferer.local_path(hash);
     let file = match fs::File::open(&path) {
       Ok(f) => f,
       Err(_) => return Err(libc::EIO),
@@ -205,9 +186,9 @@ impl BlobStorage {
       let mut touched = self.touched_blobs.write().unwrap();
       touched.insert(hash.clone(), timeval());
     }
-    let file = self.local_path(hash);
+    let file = self.transferer.local_path(hash);
     if !file.exists() {
-      try!(self.fetch_from_server(hash));
+      try!(self.transferer.fetch_from_server(hash));
       let blob = try!(Blob::load(&file));
       self.metadata.mark_deleted_blobs(&[hash.clone()], false);
       Ok(blob)
@@ -218,7 +199,7 @@ impl BlobStorage {
 
   fn store_blob(&self, blob: Blob) -> Result<BlobHash, c_int> {
     let hash = blob.hash();
-    let file = self.local_path(&hash);
+    let file = self.transferer.local_path(&hash);
     try!(blob.store(&file));
     {
       let mut written_blobs = self.written_blobs.write().unwrap();
@@ -258,50 +239,6 @@ impl BlobStorage {
     self.metadata.node_exists(node)
   }
 
-  fn upload_to_server(&self, hashes: &[BlobHash]) -> Result<(), c_int> {
-    for _ in 0..10 {
-      let mut cmd = self.connect_to_server();
-      for hash in hashes {
-        let path = self.local_path(hash);
-        if !path.exists() {
-          eprintln!("ERROR: couldn't find file {:?} to upload!", path);
-        } else {
-          cmd.arg(&path);
-        }
-      }
-      cmd.arg(&self.server);
-      match cmd.status() {
-        Ok(_) => return Ok(()),
-        Err(_) => {},
-      }
-    }
-    eprintln!("ERROR: Failed to upload blocks to server");
-    Err(libc::EIO)
-  }
-
-  fn fetch_from_server(&self, hash: &BlobHash) -> Result<(), c_int> {
-    let remote = self.remote_path(hash);
-    for _ in 0..10 {
-      let mut cmd = self.connect_to_server();
-      cmd.arg(&remote);
-      cmd.arg(&self.source);
-      match cmd.status() {
-        Ok(_) => return Ok(()),
-        Err(_) => {},
-      }
-    }
-    eprintln!("Failed to get block from server");
-    Err(libc::EIO)
-  }
-
-  fn connect_to_server(&self) -> Command {
-    let mut cmd = Command::new("rsync");
-    cmd.arg("--quiet");
-    cmd.arg("--timeout=5");
-    cmd.arg("--whole-file");
-    cmd
-  }
-
   pub fn do_save(&self) {
     let mut written_blobs = self.written_blobs.write().unwrap();
     self.metadata.set_blobs(written_blobs.drain(..));
@@ -311,7 +248,7 @@ impl BlobStorage {
     loop {
       let mut hashes = self.metadata.to_upload();
       if hashes.len() == 0 { break }
-      if self.upload_to_server(&hashes).is_ok() {
+      if self.transferer.upload_to_server(&hashes).is_ok() {
         self.metadata.mark_synced_blobs(hashes.drain(..));
       }
     }
@@ -337,7 +274,7 @@ impl BlobStorage {
       }
       let mut deleted = Vec::new();
       for (hash, size) in hashes_to_delete {
-        let path = self.local_path(&hash);
+        let path = self.transferer.local_path(&hash);
         let delete_worked = fs::remove_file(&path).is_ok();
         if !delete_worked {
           if !path.exists() {
