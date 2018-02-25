@@ -40,6 +40,13 @@ macro_rules! dberror_return {
   }
 }
 
+#[derive(Serialize, Deserialize)]
+pub struct NodeInfo {
+  pub rowid: i64,
+  pub id: i64,
+  pub hash: BlobHash,
+  pub creation: i64,
+}
 
 impl MetadataDB {
   fn hash_from_string(hash: String) -> BlobHash {
@@ -63,7 +70,8 @@ impl MetadataDB {
     connection.execute("CREATE TABLE IF NOT EXISTS nodes (
       id              INTEGER NOT NULL,
       hash            TEXT NOT NULL,
-      creation        INTEGER NOT NULL
+      creation        INTEGER NOT NULL,
+      synced          INTEGER NOT NULL
     )", &[]).unwrap();
 
     connection.execute("CREATE TABLE IF NOT EXISTS blobs (
@@ -116,9 +124,42 @@ impl MetadataDB {
     let time = timeval();
     let conn = self.connection.lock().unwrap();
     dberror_return!(conn.execute(
-      "INSERT INTO nodes (id, hash, creation) VALUES (?1, ?2, ?3)",
+      "INSERT INTO nodes (id, hash, creation, synced) VALUES (?1, ?2, ?3, 0)",
       &[&(node as i64), &(hex::encode(hash)), &time]));
     Ok(())
+  }
+
+  pub fn to_upload_nodes(&self) -> Vec<NodeInfo> {
+    let conn = self.connection.lock().unwrap();
+    let mut stmt = conn.prepare(&format!(
+      "SELECT nodes.rowid, nodes.id, nodes.hash, nodes.creation
+       FROM nodes JOIN blobs ON nodes.hash = blobs.hash
+       WHERE nodes.synced = 0 AND blobs.synced = 1
+       ORDER BY nodes.rowid LIMIT {}", TO_UPLOAD_NODES)).unwrap();
+    let iter = stmt.query_map(&[], |row| {
+      NodeInfo {
+        rowid: row.get(0),
+        id: row.get(1),
+        hash: Self::hash_from_string(row.get(2)),
+        creation: row.get(3),
+      }
+    }).unwrap();
+    let mut vals = Vec::new();
+    for val in iter {
+      vals.push(val.unwrap());
+    }
+    vals
+  }
+
+  pub fn mark_synced_nodes(&self, vals: &[i64]) {
+    let mut conn = self.connection.lock().unwrap();
+    let tran = conn.transaction().unwrap();
+    for rowid in vals {
+      dberror_test!(tran.execute(
+        "UPDATE OR IGNORE nodes SET synced = 1 WHERE rowid = ?1",
+        &[rowid]));
+    }
+    tran.commit().unwrap();
   }
 
   #[allow(dead_code)] pub fn get_blob(&self, hash: &BlobHash) -> Result<(bool, u64, i64), c_int> {
@@ -191,7 +232,7 @@ impl MetadataDB {
   pub fn to_upload(&self) -> Vec<BlobHash> {
     let conn = self.connection.lock().unwrap();
     let mut stmt = conn.prepare(&format!(
-      "SELECT hash FROM blobs WHERE synced = 0 LIMIT {}", TO_UPLOAD)).unwrap();
+      "SELECT hash FROM blobs WHERE synced = 0 ORDER BY rowid LIMIT {}", TO_UPLOAD)).unwrap();
     let hash_iter = stmt.query_map(&[], |row| {
       Self::hash_from_string(row.get(0))
     }).unwrap();
@@ -355,5 +396,29 @@ mod tests {
     let mut vals = vec![(from_hash, timeval())];
     db.touch_blobs(vals.drain(..));
     assert_eq!(10, db.localbytes());
+  }
+
+  #[test]
+  fn to_upload_nodes() {
+    let conn = Connection::open_in_memory().unwrap();
+    let db = MetadataDB::new(conn);
+    let from_hash = [1;HASHSIZE];
+    db.set_blob(&from_hash, 0);
+    db.set_node(0, &from_hash).unwrap();
+
+    // When we haven't synced any blobs there are no nodes to upload
+    let to_upload = db.to_upload_nodes();
+    assert_eq!(0, to_upload.len());
+
+    // After we sync the blob we can upload
+    db.mark_synced_blob(&from_hash);
+    let to_upload = db.to_upload_nodes();
+    assert_eq!(1, to_upload.len());
+    assert_eq!(from_hash, to_upload[0].hash);
+
+    // After we sync the node there's again nothing left
+    db.mark_synced_nodes(&[to_upload[0].rowid]);
+    let to_upload = db.to_upload_nodes();
+    assert_eq!(0, to_upload.len());
   }
 }

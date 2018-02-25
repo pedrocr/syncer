@@ -6,7 +6,7 @@ use super::blobstorage::*;
 use rwhashes::*;
 use settings::*;
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::{Arc, Mutex};
 use self::libc::c_int;
@@ -14,14 +14,19 @@ use self::libc::c_int;
 pub struct Transferer {
   source: PathBuf,
   server: String,
+  blobs: String,
   ongoing: RwHashes<BlobHash, Arc<Mutex<bool>>>,
 }
 
 impl Transferer {
   pub fn new(source: PathBuf, server: String) -> Self {
+    let mut blobs = server.clone();
+    blobs.push_str(&"/blobs/");
+
     Self {
       source,
       server,
+      blobs,
       ongoing: RwHashes::new(8),
     }
   }
@@ -37,10 +42,23 @@ impl Transferer {
   }
 
   fn remote_path(&self, hash: &BlobHash) -> String {
-    let mut remote = self.server.clone();
+    let mut remote = self.blobs.clone();
     remote.push_str(&"/");
     remote.push_str(&hex::encode(hash));
     remote
+  }
+
+  pub fn send(&self, path: &Path) {
+    for _ in 0..10 {
+      let mut cmd = self.connect_to_server();
+      cmd.arg(path);
+      cmd.arg(&self.server);
+      match cmd.status() {
+        Ok(_) => return,
+        Err(_) => {},
+      }
+    }
+    eprintln!("ERROR: Failed to upload file to server");
   }
 
   pub fn upload_to_server(&self, hashes: &[BlobHash]) -> Result<(), c_int> {
@@ -54,7 +72,7 @@ impl Transferer {
           cmd.arg(&path);
         }
       }
-      cmd.arg(&self.server);
+      cmd.arg(&self.blobs);
       match cmd.status() {
         Ok(_) => return Ok(()),
         Err(_) => {},

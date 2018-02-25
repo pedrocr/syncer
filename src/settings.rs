@@ -3,6 +3,9 @@
 // How many blobs to fetch at once for upload
 pub const TO_UPLOAD: usize = 4;
 
+// How many nodes to fetch at once for upload
+pub const TO_UPLOAD_NODES: usize = 10;
+
 // How many blobs to fetch at once for delete
 pub const TO_DELETE: usize = 100;
 

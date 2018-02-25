@@ -2,11 +2,13 @@ extern crate rusqlite;
 extern crate blake2;
 extern crate hex;
 extern crate libc;
+extern crate bincode;
 
 use super::metadatadb::*;
 use super::transferer::*;
 use settings::*;
 use rwhashes::*;
+use self::bincode::serialize;
 use self::rusqlite::Connection;
 use self::blake2::Blake2b;
 use self::blake2::digest::{Input, VariableOutput};
@@ -18,6 +20,7 @@ use std::io::prelude::*;
 use std::usize;
 use std::collections::HashMap;
 use std::sync::RwLock;
+use std::fs::OpenOptions;
 
 pub type BlobHash = [u8;HASHSIZE];
 
@@ -89,6 +92,7 @@ impl Blob {
 
 pub struct BlobStorage {
   maxbytes: u64,
+  source: PathBuf,
   transferer: Transferer,
   metadata: MetadataDB,
   written_blobs: RwLock<Vec<(BlobHash, u64, i64)>>,
@@ -113,6 +117,7 @@ impl BlobStorage {
 
     Ok(BlobStorage {
       maxbytes,
+      source: PathBuf::from(source),
       transferer: Transferer::new(path, server.to_string()),
       metadata: meta,
       written_blobs: RwLock::new(Vec::new()),
@@ -257,6 +262,40 @@ impl BlobStorage {
       if self.transferer.upload_to_server(&hashes).is_ok() {
         self.metadata.mark_synced_blobs(hashes.drain(..));
       }
+    }
+  }
+
+  pub fn do_uploads_nodes(&self) {
+    let mut path = self.source.clone();
+    path.push("node_entries");
+    let mut written = false;
+
+    loop {
+      let nodes = self.metadata.to_upload_nodes();
+      if nodes.len() == 0 { break }
+      let mut file = match OpenOptions::new().append(true).create(true).open(&path) {
+        Err(e) => {eprintln!("ERROR: couldn't write to entries file: {}", e); break;},
+        Ok(f) => f,
+      };
+      let mut synced = Vec::new();
+      for nodeinfo in nodes {
+        let mut encoded = hex::encode(serialize(&nodeinfo).unwrap());
+        encoded.push('\n');
+        match file.write_all(&encoded.into_bytes()) {
+          Err(e) => {eprintln!("ERROR: couldn't write entry in entries file: {}", e); break;},
+          Ok(_) => {synced.push(nodeinfo.rowid)},
+        }
+      }
+      match file.sync_all() {
+        Err(e) => {eprintln!("ERROR: couldn't fsync entries file: {}", e);},
+        Ok(_) => {},
+      }
+      self.metadata.mark_synced_nodes(&synced);
+      written = true;
+    }
+
+    if written {
+      self.transferer.send(&path);
     }
   }
 
