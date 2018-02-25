@@ -42,7 +42,7 @@ fn init(args: &[String]) {
 
   match fs::create_dir(&path) {
     Ok(_) => {},
-    Err(e) => {eprintln!("Couldn't create dir: {}", e); process::exit(3);},
+    Err(e) => {eprintln!("ERROR: Couldn't create dir: {}", e); process::exit(3);},
   }
 
   let mut conffile = PathBuf::from(&path);
@@ -50,7 +50,7 @@ fn init(args: &[String]) {
 
   match conf.save_config(&conffile) {
     Ok(_) => {},
-    Err(e) => {eprintln!("Couldn't save config file: {}", e); process::exit(3);},
+    Err(e) => {eprintln!("ERROR: Couldn't save config file: {}", e); process::exit(3);},
   }
 }
 
@@ -67,7 +67,7 @@ fn mount(args: &[String]) {
 
   let conf = match config::Config::fetch_config(&config) {
     Ok(c) => c,
-    Err(e) => {eprintln!("Couldn't load config file: {}", e); process::exit(3);},
+    Err(e) => {eprintln!("ERROR: Couldn't load config file: {}", e); process::exit(3);},
   };
 
   println!("Starting filesystem from {:?} and {:?} in {:?}", path, conf.server, mount);
