@@ -97,9 +97,8 @@ impl Blob {
 
 pub struct BlobStorage {
   maxbytes: u64,
-  source: PathBuf,
+  local: PathBuf,
   server: String,
-  blobs: String,
   ongoing: RwHashes<BlobHash, Arc<Mutex<bool>>>,
   metadata: MetadataDB,
   written_blobs: RwLock<Vec<(BlobHash, u64, i64)>>,
@@ -109,6 +108,7 @@ pub struct BlobStorage {
 
 impl BlobStorage {
   pub fn new(source: &Path, server: &str, maxbytes: u64) -> Result<Self, c_int> {
+    // Make sure the local blobs dir exists
     let mut path = PathBuf::from(source);
     path.push("blobs");
     match fs::create_dir_all(&path) {
@@ -121,14 +121,11 @@ impl BlobStorage {
     file.push("metadata.sqlite3");
     let connection = Connection::open(&file).unwrap();
     let meta = MetadataDB::new(connection);
-    let mut blobs = server.to_string();
-    blobs.push_str(&"/blobs/");
 
     Ok(BlobStorage {
       maxbytes,
-      source: PathBuf::from(source),
+      local: PathBuf::from(source),
       server: server.to_string(),
-      blobs,
       ongoing: RwHashes::new(8),
       metadata: meta,
       written_blobs: RwLock::new(Vec::new()),
@@ -270,7 +267,7 @@ impl BlobStorage {
   }
 
   pub fn do_uploads_nodes(&self) {
-    let mut path = self.source.clone();
+    let mut path = self.local.clone();
     path.push("node_entries");
     let mut written = false;
 
@@ -353,14 +350,15 @@ impl BlobStorage {
     // random lookup in a directory with lots of files. So just store all the hashed
     // files in a straight directory with no fanout to not waste space with directory
     // entries. Just doing a 12bit fanout (4096 directories) wastes 17MB on ext4.
-    let mut path = self.source.clone();
+    let mut path = self.local.clone();
+    path.push("blobs");
     path.push(hex::encode(hash));
     path
   }
 
   fn remote_path(&self, hash: &BlobHash) -> String {
-    let mut remote = self.blobs.clone();
-    remote.push_str(&"/");
+    let mut remote = self.server.clone();
+    remote.push_str(&"/blobs/");
     remote.push_str(&hex::encode(hash));
     remote
   }
@@ -389,7 +387,9 @@ impl BlobStorage {
           cmd.arg(&path);
         }
       }
-      cmd.arg(&self.blobs);
+      let mut path = self.local.clone();
+      path.push("blobs");
+      cmd.arg(&path);
       match cmd.status() {
         Ok(_) => return Ok(()),
         Err(_) => {},
@@ -460,7 +460,9 @@ impl BlobStorage {
     for _ in 0..10 {
       let mut cmd = self.connect_to_server();
       cmd.arg(&remote);
-      cmd.arg(&self.source);
+      let mut path = self.local.clone();
+      path.push("blobs");
+      cmd.arg(&path);
       match cmd.status() {
         Ok(_) => return true,
         Err(_) => {},
