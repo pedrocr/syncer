@@ -38,10 +38,7 @@ fn init(args: &[String]) {
     },
   };
 
-  let conf = config::Config {
-    server,
-    maxbytes,
-  };
+  let conf = config::Config::new(server, maxbytes);
 
   match fs::create_dir(&path) {
     Ok(_) => {},
@@ -74,8 +71,8 @@ fn mount(args: &[String]) {
   };
 
   println!("Starting filesystem from {:?} and {:?} in {:?}", path, conf.server, mount);
-  match syncer::run(&source, &conf.server, &mount, conf.maxbytes) {
+  match syncer::run(&source, &mount, &conf) {
     Ok(_) => {},
-    Err(e) => eprintln!("FUSE error: {:?}", e),
+    Err(e) => eprintln!("MOUNT ERROR: {}", e),
   }
 }

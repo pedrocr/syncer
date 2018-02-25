@@ -4,13 +4,25 @@ use std::path::Path;
 use std::fs::File;
 use std::io::{Read,Write};
 
+use settings::*;
+
 #[derive(Serialize, Deserialize)]
 pub struct Config {
+  #[serde(default)]
+  pub formatversion: u64,
   pub server: String,
   pub maxbytes: u64,
 }
 
 impl Config {
+  pub fn new(server: String, maxbytes: u64) -> Self {
+    Self {
+      formatversion: FORMATVERSION,
+      server,
+      maxbytes,
+    }
+  }
+
   pub fn fetch_config(path: &Path) -> Result<Config, String> {
     let mut file = match File::open(path) {
       Ok(f) => f,

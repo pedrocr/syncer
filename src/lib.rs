@@ -16,6 +16,9 @@ mod settings;
 mod rwhashes;
 pub mod config;
 
+use settings::*;
+use config::*;
+
 use self::backingstore::BackingStore;
 use self::filesystem::FS;
 
@@ -60,8 +63,14 @@ impl BackgroundThread {
   }
 }
 
-pub fn run(source: &Path, server: &str, mount: &Path, maxbytes: u64) -> Result<(), Error> {
-  let bs = match BackingStore::new(source, server, maxbytes) {
+pub fn run(source: &Path, mount: &Path, conf: &Config) -> Result<(), Error> {
+  if conf.formatversion < FORMATVERSION {
+    let message = format!("Trying to mount old format (version {} vs {})",
+                           conf.formatversion, FORMATVERSION);
+    return Err(Error::new(ErrorKind::Other, message));
+  }
+
+  let bs = match BackingStore::new(source, &conf.server, conf.maxbytes) {
     Ok(bs) => bs,
     Err(_) => return Err(Error::new(ErrorKind::Other, "Couldn't create the backing store")),
   };
