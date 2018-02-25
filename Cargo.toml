@@ -19,6 +19,7 @@ serde_derive = "1"
 bincode = "1"
 rusqlite = "0.13.0"
 crossbeam = "0.3.2"
+toml = "0.4"
 
 [profile.dev]
 opt-level = 3

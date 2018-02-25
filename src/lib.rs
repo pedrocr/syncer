@@ -8,11 +8,13 @@ use std::ffi::{OsStr};
 use std::time;
 use std::mem;
 use std::sync::mpsc;
+use std::path::Path;
 
 mod filesystem;
 mod backingstore;
 mod settings;
 mod rwhashes;
+pub mod config;
 
 use self::backingstore::BackingStore;
 use self::filesystem::FS;
@@ -58,7 +60,7 @@ impl BackgroundThread {
   }
 }
 
-pub fn run(source: &str, server: &str, mount: &str, maxbytes: u64) -> Result<(), Error> {
+pub fn run(source: &Path, server: &str, mount: &Path, maxbytes: u64) -> Result<(), Error> {
   let bs = match BackingStore::new(source, server, maxbytes) {
     Ok(bs) => bs,
     Err(_) => return Err(Error::new(ErrorKind::Other, "Couldn't create the backing store")),

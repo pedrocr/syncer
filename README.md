@@ -51,8 +51,8 @@ $ cargo install -f syncer
 To start the filesystem do something like:
 
 ```sh
-
-$ syncer data someserver:~/blobs/ mnt 1000
+$ syncer init source someserver:~/blobs/ 1000
+$ syncer mount source mnt
 ```
 
 That will give you a filesystem at `mnt` that you can use normally. The data for it comes from the `data` folder locally and the server. At most syncer will try to use 1GB locally and then fetch from server when needed.

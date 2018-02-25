@@ -101,7 +101,7 @@ pub struct BlobStorage {
 }
 
 impl BlobStorage {
-  pub fn new(source: &str, server: &str, maxbytes: u64) -> Result<Self, c_int> {
+  pub fn new(source: &Path, server: &str, maxbytes: u64) -> Result<Self, c_int> {
     let mut path = PathBuf::from(source);
     path.push("blobs");
     match fs::create_dir_all(&path) {

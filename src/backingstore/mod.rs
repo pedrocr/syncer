@@ -14,6 +14,7 @@ use rwhashes::*;
 use self::bincode::{serialize, deserialize};
 use self::libc::c_int;
 use std::sync::Mutex;
+use std::path::Path;
 
 pub struct BackingStore {
   blobs: BlobStorage,
@@ -23,7 +24,7 @@ pub struct BackingStore {
 }
 
 impl BackingStore {
-  pub fn new(path: &str, server: &str, maxbytes: u64) -> Result<Self, c_int> {
+  pub fn new(path: &Path, server: &str, maxbytes: u64) -> Result<Self, c_int> {
     let bs = try!(BlobStorage::new(path, server, maxbytes));
     let zero = BlobStorage::zero(1);
     let nodecount = try!(bs.max_node()) + 1;
