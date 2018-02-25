@@ -3,6 +3,12 @@ Normal bugs
 
   - Make sure that `touch()` will create the blob in the database if it doesn't exist in case we crash after having written to disk but before having written to the database
 
+OSX stuff
+---------
+
+  - Implement `setvolname()`
+  - Implement `getxtimes()` by fetching the values we are already setting in `utimens_macos()`
+
 Proper versioning of the on-disk data
 -------------------------------------
 
