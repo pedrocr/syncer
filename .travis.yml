@@ -3,10 +3,15 @@ rust:
   - stable
   - beta
   - nightly
+os:
+  - linux
+  - osx
 addons:
   apt:
     packages:
       - libfuse-dev
+install:
+  - if [ "$TRAVIS_OS_NAME" == "osx" ]; then brew update && brew tap caskroom/cask && brew cask install osxfuse; fi
 notifications:
   email:
     recipients:
