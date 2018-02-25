@@ -9,7 +9,7 @@ use std::path::PathBuf;
 fn usage() {
   eprintln!("USAGE:");
   eprintln!("  syncer init <local dir> <remote source> <max local size in MB>");
-  eprintln!("  syncer mount <mount dir>");
+  eprintln!("  syncer mount <local dir> <mount dir>");
   process::exit(2);
 }
 
