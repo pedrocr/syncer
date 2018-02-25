@@ -20,6 +20,7 @@ bincode = "1"
 rusqlite = "0.13.0"
 crossbeam = "0.3.2"
 toml = "0.4"
+base64 = "0.9"
 
 [profile.dev]
 opt-level = 3

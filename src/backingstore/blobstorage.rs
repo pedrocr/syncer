@@ -1,6 +1,7 @@
 extern crate rusqlite;
 extern crate blake2;
 extern crate hex;
+extern crate base64;
 extern crate libc;
 extern crate bincode;
 extern crate crossbeam;
@@ -280,7 +281,7 @@ impl BlobStorage {
       };
       let mut synced = Vec::new();
       for nodeinfo in nodes {
-        let mut encoded = hex::encode(serialize(&nodeinfo).unwrap());
+        let mut encoded = base64::encode(&serialize(&nodeinfo).unwrap());
         encoded.push('\n');
         match file.write_all(&encoded.into_bytes()) {
           Err(e) => {eprintln!("ERROR: couldn't write entry in entries file: {}", e); break;},
