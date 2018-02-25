@@ -214,7 +214,7 @@ dependencies = [
 
 [[package]]
 name = "syncer"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "bincode 1.0.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "blake2 0.7.0 (registry+https://github.com/rust-lang/crates.io-index)",
