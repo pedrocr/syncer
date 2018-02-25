@@ -189,13 +189,16 @@ impl MetadataDB {
   }
 
   pub fn touch_blobs<I>(&self, vals: I)
-    where I: Iterator<Item = (BlobHash, i64)> {
+    where I: Iterator<Item = (BlobHash, (i64, usize))> {
     let mut conn = self.connection.lock().unwrap();
     let tran = conn.transaction().unwrap();
-    for (hash, time) in vals {
+    for (hash, (time, size)) in vals {
       dberror_test!(tran.execute(
-        "UPDATE OR IGNORE blobs SET last_use = ?2, present = 1 WHERE hash = ?1",
-         &[&(hex::encode(hash)), &time]));
+        "INSERT OR REPLACE INTO blobs (hash, present, last_use, size, synced)
+         VALUES (?1, 1, ?2, ?3,
+           COALESCE((SELECT synced FROM blobs WHERE hash = ?1), 0)
+         );",
+         &[&(hex::encode(hash)), &time, &(size as i64)]));
     }
     tran.commit().unwrap();
   }
@@ -309,7 +312,7 @@ mod tests {
     assert_eq!(false, synced);
     assert!(from_time >= last_used);
     std::thread::sleep(std::time::Duration::from_millis(10));
-    let mut vals = vec![(from_hash, timeval())];
+    let mut vals = vec![(from_hash, (timeval(),10))];
     db.touch_blobs(vals.drain(..));
     db.mark_synced_blob(&from_hash);
     let (synced, _, new_last_used) = db.get_blob(&from_hash).unwrap();
@@ -393,7 +396,7 @@ mod tests {
     assert_eq!(10, db.localbytes());
     db.mark_deleted_blobs(&[from_hash], true);
     assert_eq!(0, db.localbytes());
-    let mut vals = vec![(from_hash, timeval())];
+    let mut vals = vec![(from_hash, (timeval(),10))];
     db.touch_blobs(vals.drain(..));
     assert_eq!(10, db.localbytes());
   }
@@ -420,5 +423,16 @@ mod tests {
     db.mark_synced_nodes(&[to_upload[0].rowid]);
     let to_upload = db.to_upload_nodes();
     assert_eq!(0, to_upload.len());
+  }
+
+  #[test]
+  fn touch_creates() {
+    let conn = Connection::open_in_memory().unwrap();
+    let db = MetadataDB::new(conn);
+    let from_hash = [0;HASHSIZE];
+    assert_eq!(0, db.localbytes());
+    let mut vals = vec![(from_hash, (timeval(), 10))];
+    db.touch_blobs(vals.drain(..));
+    assert_eq!(10, db.localbytes());
   }
 }

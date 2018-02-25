@@ -1,7 +1,6 @@
 Normal bugs
 -----------
 
-  - Make sure that `touch()` will create the blob in the database if it doesn't exist in case we crash after having written to disk but before having written to the database
 
 OSX stuff
 ---------

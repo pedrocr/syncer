@@ -3,9 +3,9 @@ extern crate blake2;
 extern crate hex;
 extern crate libc;
 extern crate bincode;
+extern crate crossbeam;
 
 use super::metadatadb::*;
-use super::transferer::*;
 use settings::*;
 use rwhashes::*;
 use self::bincode::serialize;
@@ -19,8 +19,9 @@ use std::fs;
 use std::io::prelude::*;
 use std::usize;
 use std::collections::HashMap;
-use std::sync::RwLock;
+use std::sync::{Arc, Mutex, RwLock};
 use std::fs::OpenOptions;
+use std::process::Command;
 
 pub type BlobHash = [u8;HASHSIZE];
 
@@ -88,15 +89,21 @@ impl Blob {
     hasher.variable_result(&mut buf).unwrap();
     buf
   }
+
+  fn len(&self) -> usize {
+    self.data.len()
+  }
 }
 
 pub struct BlobStorage {
   maxbytes: u64,
   source: PathBuf,
-  transferer: Transferer,
+  server: String,
+  blobs: String,
+  ongoing: RwHashes<BlobHash, Arc<Mutex<bool>>>,
   metadata: MetadataDB,
   written_blobs: RwLock<Vec<(BlobHash, u64, i64)>>,
-  touched_blobs: RwLock<HashMap<BlobHash,i64>>,
+  touched_blobs: RwLock<HashMap<BlobHash,(i64, usize)>>,
   blob_cache: RwHashes<u64, HashMap<usize, Blob>>,
 }
 
@@ -114,11 +121,15 @@ impl BlobStorage {
     file.push("metadata.sqlite3");
     let connection = Connection::open(&file).unwrap();
     let meta = MetadataDB::new(connection);
+    let mut blobs = server.to_string();
+    blobs.push_str(&"/blobs/");
 
     Ok(BlobStorage {
       maxbytes,
       source: PathBuf::from(source),
-      transferer: Transferer::new(path, server.to_string()),
+      server: server.to_string(),
+      blobs,
+      ongoing: RwHashes::new(8),
       metadata: meta,
       written_blobs: RwLock::new(Vec::new()),
       touched_blobs: RwLock::new(HashMap::new()),
@@ -127,7 +138,7 @@ impl BlobStorage {
   }
 
   pub fn fsync_file(&self, hash: &BlobHash) -> Result<(), c_int> {
-    let path = self.transferer.local_path(hash);
+    let path = self.local_path(hash);
     let file = match fs::File::open(&path) {
       Ok(f) => f,
       Err(_) => return Err(libc::EIO),
@@ -187,30 +198,23 @@ impl BlobStorage {
   }
 
   fn get_blob(&self, hash: &BlobHash, readahead: &[BlobHash]) -> Result<Blob, c_int> {
+    self.readahead_from_server(readahead);
+    let file = self.local_path(hash);
+    if !file.exists() {
+      try!(self.fetch_from_server(hash));
+    }
+    let blob = try!(Blob::load(&file));
     {
       let timeval = timeval();
       let mut touched = self.touched_blobs.write().unwrap();
-      touched.insert(hash.clone(), timeval);
-      for hash in readahead {
-        if hash != &HASHZERO {
-          touched.insert(hash.clone(), timeval);
-        }
-      }
+      touched.insert(hash.clone(), (timeval, blob.len()));
     }
-    let file = self.transferer.local_path(hash);
-    if !file.exists() {
-      self.transferer.readahead_from_server(readahead);
-      try!(self.transferer.fetch_from_server(hash));
-      let blob = try!(Blob::load(&file));
-      Ok(blob)
-    } else {
-      Blob::load(&file)
-    }
+    Ok(blob)
   }
 
   fn store_blob(&self, blob: Blob) -> Result<BlobHash, c_int> {
     let hash = blob.hash();
-    let file = self.transferer.local_path(&hash);
+    let file = self.local_path(&hash);
     try!(blob.store(&file));
     {
       let mut written_blobs = self.written_blobs.write().unwrap();
@@ -259,7 +263,7 @@ impl BlobStorage {
     loop {
       let mut hashes = self.metadata.to_upload();
       if hashes.len() == 0 { break }
-      if self.transferer.upload_to_server(&hashes).is_ok() {
+      if self.upload_to_server(&hashes).is_ok() {
         self.metadata.mark_synced_blobs(hashes.drain(..));
       }
     }
@@ -295,7 +299,7 @@ impl BlobStorage {
     }
 
     if written {
-      self.transferer.send(&path);
+      self.send(&path);
     }
   }
 
@@ -319,7 +323,7 @@ impl BlobStorage {
       }
       let mut deleted = Vec::new();
       for (hash, size) in hashes_to_delete {
-        let path = self.transferer.local_path(&hash);
+        let path = self.local_path(&hash);
         let delete_worked = fs::remove_file(&path).is_ok();
         if !delete_worked {
           if !path.exists() {
@@ -342,5 +346,137 @@ impl BlobStorage {
         break
       }
     }
+  }
+
+  pub fn local_path(&self, hash: &BlobHash) -> PathBuf {
+    // As far as I can tell from online references there's no penalty in ext4 for
+    // random lookup in a directory with lots of files. So just store all the hashed
+    // files in a straight directory with no fanout to not waste space with directory
+    // entries. Just doing a 12bit fanout (4096 directories) wastes 17MB on ext4.
+    let mut path = self.source.clone();
+    path.push(hex::encode(hash));
+    path
+  }
+
+  fn remote_path(&self, hash: &BlobHash) -> String {
+    let mut remote = self.blobs.clone();
+    remote.push_str(&"/");
+    remote.push_str(&hex::encode(hash));
+    remote
+  }
+
+  pub fn send(&self, path: &Path) {
+    for _ in 0..10 {
+      let mut cmd = self.connect_to_server();
+      cmd.arg(path);
+      cmd.arg(&self.server);
+      match cmd.status() {
+        Ok(_) => return,
+        Err(_) => {},
+      }
+    }
+    eprintln!("ERROR: Failed to upload file to server");
+  }
+
+  pub fn upload_to_server(&self, hashes: &[BlobHash]) -> Result<(), c_int> {
+    for _ in 0..10 {
+      let mut cmd = self.connect_to_server();
+      for hash in hashes {
+        let path = self.local_path(hash);
+        if !path.exists() {
+          eprintln!("ERROR: couldn't find file {:?} to upload!", path);
+        } else {
+          cmd.arg(&path);
+        }
+      }
+      cmd.arg(&self.blobs);
+      match cmd.status() {
+        Ok(_) => return Ok(()),
+        Err(_) => {},
+      }
+    }
+    eprintln!("ERROR: Failed to upload blocks to server");
+    Err(libc::EIO)
+  }
+
+  pub fn readahead_from_server<'a>(&'a self, hashes: &[BlobHash]) {
+    for hash in hashes {
+      if hash != &HASHZERO && !self.local_path(hash).exists() {
+        let hash = hash.clone();
+        unsafe{crossbeam::spawn_unsafe(move || {
+          let mut ongoing = self.ongoing.write(&hash);
+          if !ongoing.contains_key(&hash) {
+            let mutex = Arc::new(Mutex::new(false));
+            let mut res = mutex.lock().unwrap();
+            ongoing.insert(hash.clone(), mutex.clone());
+            drop(ongoing);
+            *res = self.real_fetch_from_server(&hash);
+            {
+              let mut ongoing = self.ongoing.write(&hash); // Grab the lock again
+              ongoing.remove(&hash); // Remove from the hash as it's already done now
+            }
+            // If we've loaded the file we need to make sure it gets touch()ed so that
+            // it shows up in the blobs table if it didn't exist before
+            let file = self.local_path(&hash);
+            match Blob::load(&file) {
+              Err(_) => {}, 
+              Ok(blob) => {
+                let timeval = timeval();
+                let mut touched = self.touched_blobs.write().unwrap();
+                touched.insert(hash.clone(), (timeval, blob.len()));
+              },
+            }
+          }
+        });}
+      }
+    }
+  }
+
+  pub fn fetch_from_server(&self, hash: &BlobHash) -> Result<(), c_int> {
+    let mutex = {
+      let mut ongoing = self.ongoing.write(hash);
+      if ongoing.contains_key(hash) {
+        // Another thread has started this fetch, just return the lock for it to wait on it
+        ongoing.get(hash).unwrap().clone()
+      } else {
+        // We're doing it live ourselves
+        let mutex = Arc::new(Mutex::new(false));
+        let mut res = mutex.lock().unwrap();
+        ongoing.insert(hash.clone(), mutex.clone());
+        drop(ongoing); // Don't hold the lock so other threads can now fetch stuff
+        *res = self.real_fetch_from_server(hash);
+        let mut ongoing = self.ongoing.write(hash); // Grab the lock again
+        ongoing.remove(hash); // Remove from the hash as it's already done now
+        return if *res {Ok(())} else {Err(libc::EIO)}
+      }
+    };
+
+    let res = mutex.lock().unwrap();
+    if *res {Ok(())} else {Err(libc::EIO)}
+  }
+
+  fn real_fetch_from_server(&self, hash: &BlobHash) -> bool {
+    let remote = self.remote_path(hash);
+    for _ in 0..10 {
+      let mut cmd = self.connect_to_server();
+      cmd.arg(&remote);
+      cmd.arg(&self.source);
+      match cmd.status() {
+        Ok(_) => return true,
+        Err(_) => {},
+      }
+    }
+    eprintln!("Failed to get block from server");
+    false
+  }
+
+  fn connect_to_server(&self) -> Command {
+    let mut cmd = Command::new("rsync");
+    cmd.arg("--quiet");
+    cmd.arg("--timeout=5");
+    // --whole-file is needed instead of --append because otherwise concurrent usage while
+    // doing readhead causes short blocks
+    cmd.arg("--whole-file");
+    cmd
   }
 }

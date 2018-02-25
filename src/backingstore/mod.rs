@@ -4,7 +4,6 @@ extern crate crossbeam;
 
 mod blobstorage;
 mod metadatadb;
-mod transferer;
 
 use self::blobstorage::*;
 pub use self::blobstorage::BlobHash;
