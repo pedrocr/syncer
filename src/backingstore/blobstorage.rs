@@ -98,6 +98,7 @@ impl Blob {
 
 pub struct BlobStorage {
   maxbytes: u64,
+  peerid: String,
   local: PathBuf,
   server: String,
   ongoing: RwHashes<BlobHash, Arc<Mutex<bool>>>,
@@ -108,10 +109,18 @@ pub struct BlobStorage {
 }
 
 impl BlobStorage {
-  pub fn new(source: &Path, server: &str, maxbytes: u64) -> Result<Self, c_int> {
+  pub fn new(peerid: &str, source: &Path, server: &str, maxbytes: u64) -> Result<Self, c_int> {
     // Make sure the local blobs dir exists
     let mut path = PathBuf::from(source);
     path.push("blobs");
+    match fs::create_dir_all(&path) {
+      Ok(_) => {},
+      Err(_) => return Err(libc::EIO),
+    }
+
+    // Make sure the local nodes dir exists
+    let mut path = PathBuf::from(source);
+    path.push("nodes");
     match fs::create_dir_all(&path) {
       Ok(_) => {},
       Err(_) => return Err(libc::EIO),
@@ -125,6 +134,7 @@ impl BlobStorage {
 
     Ok(BlobStorage {
       maxbytes,
+      peerid: peerid.to_string(),
       local: PathBuf::from(source),
       server: server.to_string(),
       ongoing: RwHashes::new(8),
@@ -269,7 +279,8 @@ impl BlobStorage {
 
   pub fn do_uploads_nodes(&self) {
     let mut path = self.local.clone();
-    path.push("node_entries");
+    path.push("nodes");
+    path.push(&self.peerid.to_string());
     let mut written = false;
 
     loop {
@@ -297,7 +308,17 @@ impl BlobStorage {
     }
 
     if written {
-      self.send(&path);
+      let mut remote = self.server.clone();
+      remote.push_str(&"/nodes/");
+      for _ in 0..10 {
+        let mut cmd = self.connect_to_server();
+        cmd.arg(&path);
+        cmd.arg(&remote);
+        match cmd.status() {
+          Ok(_) => {},
+          Err(_) => eprintln!("ERROR: Failed to upload file to server"),
+        }
+      }
     }
   }
 
@@ -364,19 +385,6 @@ impl BlobStorage {
     remote
   }
 
-  pub fn send(&self, path: &Path) {
-    for _ in 0..10 {
-      let mut cmd = self.connect_to_server();
-      cmd.arg(path);
-      cmd.arg(&self.server);
-      match cmd.status() {
-        Ok(_) => return,
-        Err(_) => {},
-      }
-    }
-    eprintln!("ERROR: Failed to upload file to server");
-  }
-
   pub fn upload_to_server(&self, hashes: &[BlobHash]) -> Result<(), c_int> {
     for _ in 0..10 {
       let mut cmd = self.connect_to_server();
@@ -388,9 +396,9 @@ impl BlobStorage {
           cmd.arg(&path);
         }
       }
-      let mut path = self.local.clone();
-      path.push("blobs");
-      cmd.arg(&path);
+      let mut remote = self.server.clone();
+      remote.push_str(&"/blobs/");
+      cmd.arg(&remote);
       match cmd.status() {
         Ok(_) => return Ok(()),
         Err(_) => {},

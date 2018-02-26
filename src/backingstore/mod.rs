@@ -23,8 +23,8 @@ pub struct BackingStore {
 }
 
 impl BackingStore {
-  pub fn new(path: &Path, server: &str, maxbytes: u64) -> Result<Self, c_int> {
-    let bs = try!(BlobStorage::new(path, server, maxbytes));
+  pub fn new(peerid: &str, path: &Path, server: &str, maxbytes: u64) -> Result<Self, c_int> {
+    let bs = try!(BlobStorage::new(peerid, path, server, maxbytes));
     let zero = BlobStorage::zero(1);
     let nodecount = try!(bs.max_node()) + 1;
 

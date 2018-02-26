@@ -19,7 +19,7 @@ pub const READAHEAD: usize = 3;
 // Making them per-repository in the future may make sense for some
 
 // On-disk format version. Needs to be bumped when incompatible changes happen
-pub const FORMATVERSION: u64 = 4;
+pub const FORMATVERSION: u64 = 5;
 
 // 20 bytes are probably more than enough for safety
 pub const HASHSIZE: usize = 20;

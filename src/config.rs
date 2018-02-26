@@ -1,4 +1,9 @@
 extern crate toml;
+extern crate rand;
+extern crate hex;
+
+use self::rand::Rng;
+use self::rand::os::OsRng;
 
 use std::path::Path;
 use std::fs::File;
@@ -12,14 +17,21 @@ pub struct Config {
   pub formatversion: u64,
   pub server: String,
   pub maxbytes: u64,
+  #[serde(default)]
+  pub peerid: String,
 }
 
 impl Config {
   pub fn new(server: String, maxbytes: u64) -> Self {
+    let mut rng = OsRng::new().unwrap();
+    let mut bytes = [0u8; 8];
+    rng.fill_bytes(&mut bytes);
+
     Self {
       formatversion: FORMATVERSION,
       server,
       maxbytes,
+      peerid: hex::encode(&bytes),
     }
   }
 
@@ -33,10 +45,18 @@ impl Config {
       Ok(f) => f,
       Err(e) => return Err(format!("couldn't read config file: {}", e)),
     };
-    match toml::from_str(&conf) {
-      Ok(c) => Ok(c),
-      Err(e) => Err(format!("couldn't parse config file: {}", e)),
+    let config: Config = match toml::from_str(&conf) {
+      Ok(c) => c,
+      Err(e) => return Err(format!("couldn't parse config file: {}", e)),
+    };
+
+    if config.peerid.len() != 16 {
+      return Err(format!("invalid peer: {:?}", config.peerid));
     }
+    if !hex::decode(&config.peerid).is_ok() {
+      return Err(format!("invalid peer: {:?}", config.peerid));
+    }
+    Ok(config)
   }
 
   pub fn save_config(&self, path: &Path) -> Result<(), String> {
@@ -53,5 +73,15 @@ impl Config {
       Err(e) => return Err(format!("couldn't write config file: {}", e)),
     };
     Ok(())
+  }
+
+  pub fn peernum(&self) -> i64 {
+    let vals = hex::decode(&self.peerid).unwrap();
+    let mut val: u64 = 0;
+    for v in vals {
+      val <<= 8;
+      val & (v as u64);
+    }
+    val as i64
   }
 }
