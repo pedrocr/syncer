@@ -85,7 +85,7 @@ impl MetadataDB {
     )", &[]).unwrap();
 
     connection.execute("CREATE INDEX IF NOT EXISTS node_id
-                        ON nodes (peernum, id, creation)", &[]).unwrap();
+                        ON nodes (peernum, id)", &[]).unwrap();
 
     connection.execute("CREATE INDEX IF NOT EXISTS blob_upload
                         ON blobs (synced)", &[]).unwrap();
@@ -117,7 +117,7 @@ impl MetadataDB {
   pub fn get_node(&self, node: NodeId) -> Result<BlobHash, c_int> {
     let conn = self.connection.lock().unwrap();
     let hash: String = dberror_return!(conn.query_row(
-      "SELECT hash FROM nodes WHERE peernum=?1 AND id=?2 ORDER BY creation DESC LIMIT 1",
+      "SELECT hash FROM nodes WHERE peernum=?1 AND id=?2 ORDER BY rowid DESC LIMIT 1",
       &[&node.0, &node.1], |row| row.get(0)));
     Ok(Self::hash_from_string(hash))
   }
@@ -287,6 +287,18 @@ mod tests {
     let from_hash = [0;HASHSIZE];
     db.set_node((0,0), &from_hash).unwrap();
     assert_eq!(db.node_exists((0,0)).unwrap(), true);
+    let hash = db.get_node((0,0)).unwrap();
+    assert_eq!(from_hash, hash);
+  }
+
+  #[test]
+  fn set_and_reset_node() {
+    let conn = Connection::open_in_memory().unwrap();
+    let db = MetadataDB::new(conn);
+    let from_hash = [0;HASHSIZE];
+    db.set_node((0,0), &from_hash).unwrap();
+    let from_hash = [1;HASHSIZE];
+    db.set_node((0,0), &from_hash).unwrap();
     let hash = db.get_node((0,0)).unwrap();
     assert_eq!(from_hash, hash);
   }
