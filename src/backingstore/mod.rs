@@ -15,21 +15,25 @@ use self::libc::c_int;
 use std::sync::Mutex;
 use std::path::Path;
 
+pub type NodeId = (i64, i64);
+
 pub struct BackingStore {
+  peernum: i64,
   blobs: BlobStorage,
-  node_counter: Mutex<u64>,
-  node_cache: RwHashes<u64, FSEntry>,
+  node_counter: Mutex<i64>,
+  node_cache: RwHashes<NodeId, FSEntry>,
   zero: BlobHash,
 }
 
 impl BackingStore {
-  pub fn new(peerid: &str, path: &Path, server: &str, maxbytes: u64) -> Result<Self, c_int> {
+  pub fn new(peerid: &str, peernum: i64, path: &Path, server: &str, maxbytes: u64) -> Result<Self, c_int> {
     let bs = try!(BlobStorage::new(peerid, path, server, maxbytes));
     let zero = BlobStorage::zero(1);
-    let nodecount = try!(bs.max_node()) + 1;
+    let nodecount = try!(bs.max_node(peernum)) + 1;
 
     let out = Self {
       blobs: bs,
+      peernum,
       node_counter: Mutex::new(nodecount),
       node_cache: RwHashes::new(8),
       zero: zero,
@@ -46,29 +50,29 @@ impl BackingStore {
     self.blobs.add_blob(data)
   }
 
-  pub fn create_node(&self, entry: FSEntry) -> Result<u64, c_int> {
+  pub fn create_node(&self, entry: FSEntry) -> Result<NodeId, c_int> {
     let node = {
       let mut counter = self.node_counter.lock().unwrap();
       *counter += 1;
-      *counter
+      (self.peernum, *counter)
     };
     try!(self.save_node(node, entry));
     Ok(node)
   }
 
-  pub fn save_node(&self, node: u64, entry: FSEntry) -> Result<(), c_int> {
+  pub fn save_node(&self, node: NodeId, entry: FSEntry) -> Result<(), c_int> {
     let encoded: Vec<u8> = serialize(&entry).unwrap();
     try!(self.blobs.add_node(node, &encoded));
     Ok(())
   }
 
-  pub fn save_node_cached(&self, node: u64, entry: FSEntry) -> Result<(), c_int> {
+  pub fn save_node_cached(&self, node: NodeId, entry: FSEntry) -> Result<(), c_int> {
     let mut nodes = self.node_cache.write(&node);
     nodes.insert(node, entry);
     Ok(())
   }
 
-  pub fn get_node(&self, node: u64) -> Result<FSEntry, c_int> {
+  pub fn get_node(&self, node: NodeId) -> Result<FSEntry, c_int> {
     let nodes = self.node_cache.read(&node);
     match nodes.get(&node) {
       Some(n) => Ok((*n).clone()),
@@ -80,12 +84,12 @@ impl BackingStore {
     }
   }
 
-  pub fn fetch_node(&self, node: u64) -> Result<(BlobHash, FSEntry), c_int> {
+  pub fn fetch_node(&self, node: NodeId) -> Result<(BlobHash, FSEntry), c_int> {
     let (hash, buffer) = try!(self.blobs.read_node(node));
     Ok((hash, deserialize(&buffer[..]).unwrap()))
   }
 
-  pub fn node_exists(&self, node: u64) -> Result<bool, c_int> {
+  pub fn node_exists(&self, node: NodeId) -> Result<bool, c_int> {
     let nodes = self.node_cache.read(&node);
     Ok(match nodes.get(&node) {
       Some(_) => true,
@@ -93,15 +97,15 @@ impl BackingStore {
     })
   }
 
-  pub fn read(&self, node: u64, block: usize, hash: &BlobHash, offset: usize, bytes: usize, readahead: &[BlobHash]) -> Result<Vec<u8>, c_int> {
+  pub fn read(&self, node: NodeId, block: usize, hash: &BlobHash, offset: usize, bytes: usize, readahead: &[BlobHash]) -> Result<Vec<u8>, c_int> {
     self.blobs.read(node, block, hash, offset, bytes, readahead)
   }
 
-  pub fn write(&self, node: u64, block: usize, hash: &BlobHash, offset: usize, data: &[u8], readahead: &[BlobHash]) -> Result<(), c_int> {
+  pub fn write(&self, node: NodeId, block: usize, hash: &BlobHash, offset: usize, data: &[u8], readahead: &[BlobHash]) -> Result<(), c_int> {
     self.blobs.write(node, block, hash, offset, data, readahead)
   }
 
-  fn sync_one_node(&self, node: u64, mut entry: FSEntry) -> Result<(), c_int> {
+  fn sync_one_node(&self, node: NodeId, mut entry: FSEntry) -> Result<(), c_int> {
     for (i, hash) in try!(self.blobs.sync_node(node)) {
       entry.set_block(i, hash);
     }
@@ -109,7 +113,7 @@ impl BackingStore {
     Ok(())
   }
 
-  pub fn sync_node(&self, node: u64) -> Result<(), c_int> {
+  pub fn sync_node(&self, node: NodeId) -> Result<(), c_int> {
     let mut nodes = self.node_cache.write(&node);
     if let Some(entry) = nodes.remove(&node) {
       try!(self.sync_one_node(node, entry));
@@ -129,7 +133,7 @@ impl BackingStore {
     Ok(())
   }
 
-  pub fn fsync_node(&self, node: u64) -> Result<(), c_int> {
+  pub fn fsync_node(&self, node: NodeId) -> Result<(), c_int> {
     let (hash, entry) = try!(self.fetch_node(node));
     try!(self.blobs.fsync_file(&hash));
     for hash in entry.get_blocks() {

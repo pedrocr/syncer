@@ -70,7 +70,7 @@ pub fn run(source: &Path, mount: &Path, conf: &Config) -> Result<(), Error> {
     return Err(Error::new(ErrorKind::Other, message));
   }
 
-  let bs = match BackingStore::new(&conf.peerid, source, &conf.server, conf.maxbytes) {
+  let bs = match BackingStore::new(&conf.peerid, conf.peernum(), source, &conf.server, conf.maxbytes) {
     Ok(bs) => bs,
     Err(_) => return Err(Error::new(ErrorKind::Other, "Couldn't create the backing store")),
   };

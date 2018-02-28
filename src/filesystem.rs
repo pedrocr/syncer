@@ -71,7 +71,7 @@ pub struct FSEntry {
   bkuptime: Timespec,
   size: u64,
   blocks: Vec<BlobHash>,
-  children: HashMap<String, (u64, FileTypeDef)>,
+  children: HashMap<String, (NodeId, FileTypeDef)>,
   xattrs: HashMap<String, Vec<u8>>,
 }
 
@@ -137,19 +137,19 @@ impl FSEntry {
     out
   }
 
-  fn add_child(&mut self, name: &OsStr, node: (u64, FileTypeDef)) -> Result<(), c_int> {
+  fn add_child(&mut self, name: &OsStr, node: (NodeId, FileTypeDef)) -> Result<(), c_int> {
     self.children.insert(try!(from_os_str(name)), node);
     Ok(())
   }
 
-  fn remove_child(&mut self, name: &OsStr) -> Result<(u64, FileTypeDef), c_int> {
+  fn remove_child(&mut self, name: &OsStr) -> Result<(NodeId, FileTypeDef), c_int> {
     match self.children.remove(&try!(from_os_str(name))) {
       None => Err(libc::ENOENT),
       Some(c) => Ok(c),
     }
   }
 
-  fn write(&mut self, node: u64, bs: &BackingStore, offset: u64, data: &[u8]) -> Result<u32, c_int> {
+  fn write(&mut self, node: NodeId, bs: &BackingStore, offset: u64, data: &[u8]) -> Result<u32, c_int> {
     self.size = cmp::max(self.size, offset + data.len() as u64);
     let total_needed_blocks = (self.size as usize + BLKSIZE - 1) / BLKSIZE;
     if total_needed_blocks > self.blocks.len() {
@@ -176,7 +176,7 @@ impl FSEntry {
     Ok(written as u32)
   }
 
-  fn read(&self, node: u64, bs: &BackingStore, offset: u64, size: u32) -> Result<Vec<u8>, c_int> {
+  fn read(&self, node: NodeId, bs: &BackingStore, offset: u64, size: u32) -> Result<Vec<u8>, c_int> {
     if offset >= self.size {
       // We're asking for an out of bounds offset
       return Ok(Vec::new())
@@ -212,7 +212,7 @@ impl FSEntry {
 }
 
 struct Handle {
-  node: u64,
+  node: NodeId,
   _flags: u32,
 }
 
@@ -231,18 +231,18 @@ impl<'a> FS<'a> {
     };
 
     // Add a root node as 0 if it doesn't exist
-    if !try!(fs.backing.node_exists(0)) {
+    if !try!(fs.backing.node_exists((0,0))) {
       let mut root = FSEntry::new(FileTypeDef::Directory);
       root.perm = 0o755;
       root.uid = users::get_current_uid();
       root.gid = users::get_current_gid();
-      try!(fs.backing.save_node(0, root));
+      try!(fs.backing.save_node((0,0), root));
     }
     Ok(fs)
   }
 
   fn with_path_optional_handle<F,T>(&self, path: &Path, fh: Option<u64>, closure: &F) -> Result<T, c_int>
-    where F : Fn(&FSEntry, u64) -> T {
+    where F : Fn(&FSEntry, NodeId) -> T {
     match fh {
       Some(fh) => self.with_handle(fh, closure),
       None => self.with_path(path, closure),
@@ -250,12 +250,12 @@ impl<'a> FS<'a> {
   }
 
   fn with_path<F,T>(&self, path: &Path, closure: &F) -> Result<T, c_int>
-    where F : Fn(&FSEntry, u64) -> T {
+    where F : Fn(&FSEntry, NodeId) -> T {
     self.with_node(try!(self.find_node(path)), closure)
   }
 
   fn with_handle<F,T>(&self, handle: u64, closure: &F) -> Result<T, c_int>
-    where F : Fn(&FSEntry, u64) -> T {
+    where F : Fn(&FSEntry, NodeId) -> T {
     let node = {
       let handles = self.handles.read(&handle);
       match handles.get(&handle) {
@@ -266,14 +266,14 @@ impl<'a> FS<'a> {
     self.with_node(node, closure)
   }
 
-  fn with_node<F,T>(&self, node: u64, closure: &F) -> Result<T, c_int>
-    where F : Fn(&FSEntry, u64) -> T {
+  fn with_node<F,T>(&self, node: NodeId, closure: &F) -> Result<T, c_int>
+    where F : Fn(&FSEntry, NodeId) -> T {
     let entry = try!(self.backing.get_node(node));
     Ok(closure(&entry, node))
   }
 
   fn modify_path_optional_handle<F,T>(&self, path: &Path, fh: Option<u64>, closure: &F) -> Result<T, c_int>
-    where F : Fn(&mut FSEntry, u64) -> T {
+    where F : Fn(&mut FSEntry, NodeId) -> T {
     match fh {
       Some(fh) => self.modify_handle(fh, false, closure),
       None => self.modify_path(path, closure),
@@ -281,12 +281,12 @@ impl<'a> FS<'a> {
   }
 
   fn modify_path<F,T>(&self, path: &Path, closure: &F) -> Result<T, c_int>
-    where F : Fn(&mut FSEntry, u64) -> T {
+    where F : Fn(&mut FSEntry, NodeId) -> T {
     self.modify_node(try!(self.find_node(path)), false, closure)
   }
 
   fn modify_handle<F,T>(&self, handle: u64, cache: bool, closure: &F) -> Result<T, c_int>
-    where F : Fn(&mut FSEntry, u64) -> T {
+    where F : Fn(&mut FSEntry, NodeId) -> T {
     let node = {
       let handles = self.handles.read(&handle);
       match handles.get(&handle) {
@@ -297,8 +297,8 @@ impl<'a> FS<'a> {
     self.modify_node(node, cache, closure)
   }
 
-  fn modify_node<F,T>(&self, node: u64, cache: bool, closure: &F) -> Result<T, c_int>
-    where F : Fn(&mut FSEntry, u64) -> T {
+  fn modify_node<F,T>(&self, node: NodeId, cache: bool, closure: &F) -> Result<T, c_int>
+    where F : Fn(&mut FSEntry, NodeId) -> T {
     let mut entry = try!(self.backing.get_node(node));
     let res = closure(&mut entry, node);
     if cache {
@@ -309,8 +309,8 @@ impl<'a> FS<'a> {
     Ok(res)
   }
 
-  fn find_node(&self, path: &Path) -> Result<u64, c_int> {
-    let mut nodenum = 0; // Start with the root node
+  fn find_node(&self, path: &Path) -> Result<NodeId, c_int> {
+    let mut nodenum = (0, 0); // Start with the root node
     let mut iterator = path.iter();
     iterator.next(); // Skip the root as that's already nodenum 0
     for elem in iterator {

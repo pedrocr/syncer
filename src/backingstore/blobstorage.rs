@@ -7,6 +7,7 @@ extern crate bincode;
 extern crate crossbeam;
 
 use super::metadatadb::*;
+use super::NodeId;
 use settings::*;
 use rwhashes::*;
 use self::bincode::serialize;
@@ -105,7 +106,7 @@ pub struct BlobStorage {
   metadata: MetadataDB,
   written_blobs: RwLock<Vec<(BlobHash, u64, i64)>>,
   touched_blobs: RwLock<HashMap<BlobHash,(i64, usize)>>,
-  blob_cache: RwHashes<u64, HashMap<usize, Blob>>,
+  blob_cache: RwHashes<NodeId, HashMap<usize, Blob>>,
 }
 
 impl BlobStorage {
@@ -158,7 +159,7 @@ impl BlobStorage {
     Ok(())
   }
 
-  pub fn read(&self, node: u64, block: usize, hash: &BlobHash, offset: usize, bytes: usize, readahead: &[BlobHash]) -> Result<Vec<u8>, c_int> {
+  pub fn read(&self, node: NodeId, block: usize, hash: &BlobHash, offset: usize, bytes: usize, readahead: &[BlobHash]) -> Result<Vec<u8>, c_int> {
     // First figure out if this isn't a cached blob
     let blob_cache = self.blob_cache.read(&node);
     if let Some(blocks) = blob_cache.get(&node) {
@@ -171,7 +172,7 @@ impl BlobStorage {
     Ok(blob.read(offset, bytes))
   }
 
-  pub fn write(&self, node: u64, block: usize, hash: &BlobHash, offset: usize, data: &[u8], readahead: &[BlobHash]) -> Result<(), c_int> {
+  pub fn write(&self, node: NodeId, block: usize, hash: &BlobHash, offset: usize, data: &[u8], readahead: &[BlobHash]) -> Result<(), c_int> {
     // First figure out if this isn't a cached blob
     {
       let mut blob_cache = self.blob_cache.write(&node);
@@ -193,7 +194,7 @@ impl BlobStorage {
     Ok(hash)
   }
 
-  pub fn sync_node(&self, node: u64) -> Result<Vec<(usize, BlobHash)>, c_int> {
+  pub fn sync_node(&self, node: NodeId) -> Result<Vec<(usize, BlobHash)>, c_int> {
     let mut stored = Vec::new();
     let mut blob_cache = self.blob_cache.write(&node);
     if let Some(mut blocks) = blob_cache.remove(&node) {
@@ -242,23 +243,23 @@ impl BlobStorage {
     Ok(hash)
   }
 
-  pub fn max_node(&self) -> Result<u64, c_int> {
-    self.metadata.max_node()
+  pub fn max_node(&self, peernum: i64) -> Result<i64, c_int> {
+    self.metadata.max_node(peernum)
   }
 
-  pub fn add_node(&self, node: u64, data: &[u8]) -> Result<BlobHash, c_int> {
+  pub fn add_node(&self, node: NodeId, data: &[u8]) -> Result<BlobHash, c_int> {
     let hash = try!(self.add_blob(data));
     try!(self.metadata.set_node(node, &hash));
     Ok(hash)
   }
 
-  pub fn read_node(&self, node: u64) -> Result<(BlobHash, Vec<u8>), c_int> {
+  pub fn read_node(&self, node: NodeId) -> Result<(BlobHash, Vec<u8>), c_int> {
     let hash = try!(self.metadata.get_node(node));
     let blob = try!(self.get_blob(&hash, &[]));
     Ok((hash, blob.read(0, usize::MAX)))
   }
 
-  pub fn node_exists(&self, node: u64) -> Result<bool, c_int> {
+  pub fn node_exists(&self, node: NodeId) -> Result<bool, c_int> {
     self.metadata.node_exists(node)
   }
 
