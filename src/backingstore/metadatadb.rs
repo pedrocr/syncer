@@ -121,12 +121,11 @@ impl MetadataDB {
     Ok(Self::hash_from_string(hash))
   }
 
-  pub fn set_node(&self, node: NodeId, hash: &BlobHash) -> Result<(), c_int> {
-    let time = timeval();
+  pub fn set_node(&self, node: NodeId, hash: &BlobHash, creation: i64) -> Result<(), c_int> {
     let conn = self.connection.lock().unwrap();
     dberror_return!(conn.execute(
       "INSERT INTO nodes (peernum, id, hash, creation, synced) VALUES (?1, ?2, ?3, ?4, 0)",
-      &[&node.0, &node.1, &(hex::encode(hash)), &time]));
+      &[&node.0, &node.1, &(hex::encode(hash)), &creation]));
     Ok(())
   }
 
@@ -284,7 +283,7 @@ mod tests {
     let db = MetadataDB::new(conn);
     assert_eq!(db.node_exists((0,0)).unwrap(), false);
     let from_hash = [0;HASHSIZE];
-    db.set_node((0,0), &from_hash).unwrap();
+    db.set_node((0,0), &from_hash, timeval()).unwrap();
     assert_eq!(db.node_exists((0,0)).unwrap(), true);
     let hash = db.get_node((0,0)).unwrap();
     assert_eq!(from_hash, hash);
@@ -295,9 +294,9 @@ mod tests {
     let conn = Connection::open_in_memory().unwrap();
     let db = MetadataDB::new(conn);
     let from_hash = [0;HASHSIZE];
-    db.set_node((0,0), &from_hash).unwrap();
+    db.set_node((0,0), &from_hash, timeval()).unwrap();
     let from_hash = [1;HASHSIZE];
-    db.set_node((0,0), &from_hash).unwrap();
+    db.set_node((0,0), &from_hash, timeval()).unwrap();
     let hash = db.get_node((0,0)).unwrap();
     assert_eq!(from_hash, hash);
   }
@@ -308,7 +307,7 @@ mod tests {
     let db = MetadataDB::new(conn);
     assert_eq!(0, db.max_node(0).unwrap());
     let from_hash = [0;HASHSIZE];
-    db.set_node((0,5), &from_hash).unwrap();
+    db.set_node((0,5), &from_hash, timeval()).unwrap();
     assert_eq!(5, db.max_node(0).unwrap());
   }
 
@@ -420,7 +419,7 @@ mod tests {
     let db = MetadataDB::new(conn);
     let from_hash = [1;HASHSIZE];
     db.set_blob(&from_hash, 0);
-    db.set_node((0,0), &from_hash).unwrap();
+    db.set_node((0,0), &from_hash, timeval()).unwrap();
 
     // When we haven't synced any blobs there are no nodes to upload
     let to_upload = db.to_upload_nodes();

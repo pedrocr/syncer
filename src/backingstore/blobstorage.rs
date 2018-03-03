@@ -249,7 +249,7 @@ impl BlobStorage {
 
   pub fn add_node(&self, node: NodeId, data: &[u8]) -> Result<BlobHash, c_int> {
     let hash = try!(self.add_blob(data));
-    try!(self.metadata.set_node(node, &hash));
+    try!(self.metadata.set_node(node, &hash, timeval()));
     Ok(hash)
   }
 
