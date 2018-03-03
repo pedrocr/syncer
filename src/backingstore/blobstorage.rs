@@ -10,6 +10,7 @@ use super::metadatadb::*;
 use super::NodeId;
 use settings::*;
 use rwhashes::*;
+use config::*;
 use self::rusqlite::Connection;
 use self::blake2::Blake2b;
 use self::blake2::digest::{Input, VariableOutput};
@@ -23,7 +24,7 @@ use std::collections::HashMap;
 use std::sync::{Arc, Mutex, RwLock};
 use std::fs::OpenOptions;
 use std::process::Command;
-use std::io::{BufRead, BufReader};
+use std::io::{BufRead, BufReader, SeekFrom};
 use std::fs::File;
 
 pub type BlobHash = [u8;HASHSIZE];
@@ -349,12 +350,19 @@ impl BlobStorage {
       let filename: String = path.file_name().unwrap().to_str().unwrap().to_string();
       if filename.len() != 16 { continue }
       if filename == self.peerid { continue }
+      let peernum = convert_peerid(&filename);
 
-      for line in BufReader::new(File::open(&path).unwrap()).lines() {
+      let mut buffer = BufReader::new(File::open(&path).unwrap());
+      let mut offset = self.metadata.get_peer(peernum).unwrap();
+      buffer.seek(SeekFrom::Start(offset)).unwrap();
+
+      for line in buffer.lines() {
         let line = line.unwrap();
+        offset += line.len() as u64 + 1;
         let buffer = base64::decode(&line).unwrap();
         let node: NodeInfo = bincode::deserialize(&buffer).unwrap();
         self.metadata.set_node(node.id, &node.hash, node.creation).unwrap();
+        self.metadata.set_peer(peernum, offset).unwrap();
       }
     }
   }

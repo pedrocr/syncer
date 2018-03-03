@@ -84,6 +84,11 @@ impl MetadataDB {
       last_use        INTEGER NOT NULL
     )", &[]).unwrap();
 
+    connection.execute("CREATE TABLE IF NOT EXISTS peers (
+      id              INTEGER PRIMARY KEY,
+      offset          INTEGER NOT NULL
+    )", &[]).unwrap();
+
     connection.execute("CREATE INDEX IF NOT EXISTS node_id
                         ON nodes (peernum, id)", &[]).unwrap();
 
@@ -120,6 +125,22 @@ impl MetadataDB {
       "SELECT hash FROM nodes WHERE peernum=?1 AND id=?2 ORDER BY rowid DESC LIMIT 1",
       &[&node.0, &node.1], |row| row.get(0)));
     Ok(Self::hash_from_string(hash))
+  }
+
+  pub fn set_peer(&self, id: i64, offset: u64) -> Result<(), c_int> {
+    let conn = self.connection.lock().unwrap();
+    dberror_return!(conn.execute(
+      "INSERT OR REPLACE INTO peers (id, offset) VALUES (?1, ?2)",
+      &[&id, &(offset as i64)]));
+    Ok(())
+  }
+
+  pub fn get_peer(&self, id: i64) -> Result<u64, c_int> {
+    let conn = self.connection.lock().unwrap();
+    let val: i64 = dberror_return!(conn.query_row(
+      "SELECT COALESCE(SUM(offset), 0) FROM peers WHERE id=?1",
+      &[&id], |row| row.get(0)));
+    Ok(val as u64)
   }
 
   pub fn set_node(&self, node: NodeId, hash: &BlobHash, creation: i64) -> Result<(), c_int> {
@@ -462,5 +483,18 @@ mod tests {
     let mut vals = vec![(from_hash, (timeval(), 10))];
     db.touch_blobs(vals.drain(..));
     assert_eq!(10, db.localbytes());
+  }
+
+  #[test]
+  fn set_and_get_peer() {
+    let conn = Connection::open_in_memory().unwrap();
+    let db = MetadataDB::new(conn);
+    assert_eq!(0, db.get_peer(0).unwrap());
+    db.set_peer(0, 0).unwrap();
+    assert_eq!(0, db.get_peer(0).unwrap());
+    db.set_peer(1, 10).unwrap();
+    assert_eq!(10, db.get_peer(1).unwrap());
+    db.set_peer(0, 10).unwrap();
+    assert_eq!(10, db.get_peer(0).unwrap());
   }
 }

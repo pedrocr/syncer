@@ -21,6 +21,16 @@ pub struct Config {
   pub peerid: String,
 }
 
+pub fn convert_peerid(peerid: &str) -> i64 {
+  let vals = hex::decode(peerid).unwrap();
+  let mut val: u64 = 0;
+  for v in vals {
+    val <<= 8;
+    val & (v as u64);
+  }
+  val as i64
+}
+
 impl Config {
   pub fn new(server: String, maxbytes: u64) -> Self {
     let mut rng = OsRng::new().unwrap();
@@ -76,12 +86,6 @@ impl Config {
   }
 
   pub fn peernum(&self) -> i64 {
-    let vals = hex::decode(&self.peerid).unwrap();
-    let mut val: u64 = 0;
-    for v in vals {
-      val <<= 8;
-      val & (v as u64);
-    }
-    val as i64
+    convert_peerid(&self.peerid)
   }
 }

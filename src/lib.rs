@@ -84,7 +84,8 @@ pub fn run(source: &Path, mount: &Path, conf: &Config) -> Result<(), Error> {
   crossbeam::scope(|scope| {
     let sync   = BackgroundThread::new(&scope, 60, move || bsref.sync_all().unwrap());
     let upload = BackgroundThread::new(&scope, 10, move || bsref.do_uploads());
-    let nodes  = BackgroundThread::new(&scope, 10, move || bsref.do_uploads_nodes());
+    let nodes1 = BackgroundThread::new(&scope, 10, move || bsref.do_uploads_nodes());
+    let nodes2 = BackgroundThread::new(&scope, 10, move || bsref.do_downloads_nodes());
     let remove = BackgroundThread::new(&scope, 10, move || bsref.do_removals());
 
     let fshandle = scope.spawn(move || {
@@ -96,7 +97,8 @@ pub fn run(source: &Path, mount: &Path, conf: &Config) -> Result<(), Error> {
     let ret = fshandle.join();
     sync.join();
     upload.join();
-    nodes.join();
+    nodes1.join();
+    nodes2.join();
     remove.join();
     ret
   })
