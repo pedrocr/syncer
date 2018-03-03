@@ -72,7 +72,8 @@ impl MetadataDB {
       id              INTEGER NOT NULL,
       hash            TEXT NOT NULL,
       creation        INTEGER NOT NULL,
-      synced          INTEGER NOT NULL
+      synced          INTEGER NOT NULL,
+      UNIQUE (peernum, id, hash, creation) ON CONFLICT IGNORE
     )", &[]).unwrap();
 
     connection.execute("CREATE TABLE IF NOT EXISTS blobs (
@@ -300,6 +301,21 @@ mod tests {
     let hash = db.get_node((0,0)).unwrap();
     assert_eq!(from_hash, hash);
   }
+
+  #[test]
+  fn double_set_node() {
+    let conn = Connection::open_in_memory().unwrap();
+    let db = MetadataDB::new(conn);
+    assert_eq!(db.node_exists((0,0)).unwrap(), false);
+    let from_hash = [0;HASHSIZE];
+    db.set_blob(&from_hash, 0);
+    db.mark_synced_blob(&from_hash);
+    let time = timeval();
+    db.set_node((0,0), &from_hash, time).unwrap();
+    db.set_node((0,0), &from_hash, time).unwrap();
+    assert_eq!(1, db.to_upload_nodes().len());
+  }
+
 
   #[test]
   fn maxnode() {
