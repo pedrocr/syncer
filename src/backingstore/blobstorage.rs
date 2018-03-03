@@ -292,12 +292,12 @@ impl BlobStorage {
         Ok(f) => f,
       };
       let mut synced = Vec::new();
-      for nodeinfo in nodes {
+      for (rowid, nodeinfo) in nodes {
         let mut encoded = base64::encode(&serialize(&nodeinfo).unwrap());
         encoded.push('\n');
         match file.write_all(&encoded.into_bytes()) {
           Err(e) => {eprintln!("ERROR: couldn't write entry in entries file: {}", e); break;},
-          Ok(_) => {synced.push(nodeinfo.rowid)},
+          Ok(_) => {synced.push(rowid)},
         }
       }
       match file.sync_all() {

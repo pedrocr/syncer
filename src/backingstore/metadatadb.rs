@@ -43,7 +43,6 @@ macro_rules! dberror_return {
 
 #[derive(Serialize, Deserialize)]
 pub struct NodeInfo {
-  pub rowid: i64,
   pub id: NodeId,
   pub hash: BlobHash,
   pub creation: i64,
@@ -131,7 +130,7 @@ impl MetadataDB {
     Ok(())
   }
 
-  pub fn to_upload_nodes(&self) -> Vec<NodeInfo> {
+  pub fn to_upload_nodes(&self) -> Vec<(i64, NodeInfo)> {
     let conn = self.connection.lock().unwrap();
     let mut stmt = conn.prepare(&format!(
       "SELECT nodes.rowid, nodes.peernum, nodes.id, nodes.hash, nodes.creation
@@ -139,12 +138,12 @@ impl MetadataDB {
        WHERE nodes.synced = 0 AND blobs.synced = 1
        ORDER BY nodes.rowid LIMIT {}", TO_UPLOAD_NODES)).unwrap();
     let iter = stmt.query_map(&[], |row| {
+      (row.get(0),
       NodeInfo {
-        rowid: row.get(0),
         id: (row.get(1), row.get(2)),
         hash: Self::hash_from_string(row.get(3)),
         creation: row.get(4),
-      }
+      })
     }).unwrap();
     let mut vals = Vec::new();
     for val in iter {
@@ -431,10 +430,10 @@ mod tests {
     db.mark_synced_blob(&from_hash);
     let to_upload = db.to_upload_nodes();
     assert_eq!(1, to_upload.len());
-    assert_eq!(from_hash, to_upload[0].hash);
+    assert_eq!(from_hash, to_upload[0].1.hash);
 
     // After we sync the node there's again nothing left
-    db.mark_synced_nodes(&[to_upload[0].rowid]);
+    db.mark_synced_nodes(&[to_upload[0].0]);
     let to_upload = db.to_upload_nodes();
     assert_eq!(0, to_upload.len());
   }
