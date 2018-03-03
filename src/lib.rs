@@ -101,3 +101,20 @@ pub fn run(source: &Path, mount: &Path, conf: &Config) -> Result<(), Error> {
     ret
   })
 }
+
+pub fn clone(source: &Path, conf: &Config) -> Result<(), Error> {
+  if conf.formatversion < FORMATVERSION {
+    let message = format!("Trying to clone into old format (version {} vs {})",
+                           conf.formatversion, FORMATVERSION);
+    return Err(Error::new(ErrorKind::Other, message));
+  }
+
+  let bs = match BackingStore::new(&conf.peerid, conf.peernum(), source, &conf.server, conf.maxbytes) {
+    Ok(bs) => bs,
+    Err(_) => return Err(Error::new(ErrorKind::Other, "Couldn't create the backing store")),
+  };
+
+  bs.do_downloads_nodes();
+
+  Ok(())
+}

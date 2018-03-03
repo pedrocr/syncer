@@ -9,6 +9,7 @@ use std::path::PathBuf;
 fn usage() {
   eprintln!("USAGE:");
   eprintln!("  syncer init <local dir> <remote source> <max local size in MB>");
+  eprintln!("  syncer clone <local dir> <remote source> <max local size in MB>");
   eprintln!("  syncer mount <local dir> <mount dir>");
   process::exit(2);
 }
@@ -16,14 +17,15 @@ fn usage() {
 fn main() {
   let args: Vec<String> = env::args().collect();
   match args[1].as_ref() {
-    "init"  => init(&args[2..]),
+    "init"  => init(&args[2..], false),
+    "clone"  => init(&args[2..], true),
     "mount" => mount(&args[2..]),
     _ => usage(),
   }
 
 }
 
-fn init(args: &[String]) {
+fn init(args: &[String], fetch: bool) {
   if args.len() != 3 { usage() }
 
   let mut path = env::current_dir().unwrap();
@@ -51,6 +53,15 @@ fn init(args: &[String]) {
   match conf.save_config(&conffile) {
     Ok(_) => {},
     Err(e) => {eprintln!("ERROR: Couldn't save config file: {}", e); process::exit(3);},
+  }
+
+  if fetch {
+    let mut source = path.clone();
+    source.push("data");
+    match syncer::clone(&source, &conf) {
+      Ok(_) => {},
+      Err(e) => eprintln!("MOUNT ERROR: {}", e),
+    }
   }
 }
 

@@ -10,7 +10,6 @@ use super::metadatadb::*;
 use super::NodeId;
 use settings::*;
 use rwhashes::*;
-use self::bincode::serialize;
 use self::rusqlite::Connection;
 use self::blake2::Blake2b;
 use self::blake2::digest::{Input, VariableOutput};
@@ -24,6 +23,8 @@ use std::collections::HashMap;
 use std::sync::{Arc, Mutex, RwLock};
 use std::fs::OpenOptions;
 use std::process::Command;
+use std::io::{BufRead, BufReader};
+use std::fs::File;
 
 pub type BlobHash = [u8;HASHSIZE];
 
@@ -293,7 +294,7 @@ impl BlobStorage {
       };
       let mut synced = Vec::new();
       for (rowid, nodeinfo) in nodes {
-        let mut encoded = base64::encode(&serialize(&nodeinfo).unwrap());
+        let mut encoded = base64::encode(&bincode::serialize(&nodeinfo).unwrap());
         encoded.push('\n');
         match file.write_all(&encoded.into_bytes()) {
           Err(e) => {eprintln!("ERROR: couldn't write entry in entries file: {}", e); break;},
@@ -319,6 +320,41 @@ impl BlobStorage {
           Ok(_) => {},
           Err(_) => eprintln!("ERROR: Failed to upload file to server"),
         }
+      }
+    }
+  }
+
+  pub fn do_downloads_nodes(&self) {
+    let mut path = self.local.clone();
+    path.push("nodes");
+    let mut remote = self.server.clone();
+    remote.push_str(&"/nodes/");
+
+    // First fetch all the nodes files in the server except our own
+    for _ in 0..10 {
+      let mut cmd = self.connect_to_server();
+      cmd.arg("-r");
+      cmd.arg(format!("--exclude={}", self.peerid));
+      cmd.arg(&remote);
+      cmd.arg(&path);
+      match cmd.status() {
+        Ok(_) => {},
+        Err(_) => eprintln!("ERROR: Failed to downlad node files from server"),
+      }
+    }
+
+    for file in fs::read_dir(&path).unwrap() {
+      let path = file.unwrap().path();
+      if path.is_dir() { continue }
+      let filename: String = path.file_name().unwrap().to_str().unwrap().to_string();
+      if filename.len() != 16 { continue }
+      if filename == self.peerid { continue }
+
+      for line in BufReader::new(File::open(&path).unwrap()).lines() {
+        let line = line.unwrap();
+        let buffer = base64::decode(&line).unwrap();
+        let node: NodeInfo = bincode::deserialize(&buffer).unwrap();
+        self.metadata.set_node(node.id, &node.hash, node.creation).unwrap();
       }
     }
   }
