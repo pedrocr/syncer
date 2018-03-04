@@ -9,6 +9,7 @@ use std::ffi::{OsStr, OsString};
 use std::collections::HashMap;
 use std::cmp;
 
+use super::vclock::*;
 use backingstore::*;
 use settings::*;
 
@@ -20,7 +21,7 @@ struct TimespecDef {
   nsec: i32,
 }
 
-#[derive(Copy, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Copy, Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub enum FileTypeDef {
   NamedPipe,
   CharDevice,
@@ -45,10 +46,11 @@ impl FileTypeDef {
   }
 }
 
-#[derive(Clone, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct FSEntry {
   #[serde(with = "TimespecDef")]
   pub clock: Timespec,
+  pub vclock: VectorClock,
   pub peernum: i64,
 
   pub filetype: FileTypeDef,
@@ -85,6 +87,7 @@ impl FSEntry {
 
     FSEntry {
       clock: time,
+      vclock: VectorClock::new(),
       peernum: peernum,
       filetype: filetype,
       perm: 0,
@@ -212,7 +215,11 @@ impl FSEntry {
     &self.blocks
   }
 
-  pub fn cmp(&self, other: &Self) -> cmp::Ordering {
+  pub fn cmp_vclock(&self, other: &Self) -> VectorOrdering {
+    self.vclock.cmp(&other.vclock)
+  }
+
+  pub fn cmp_time(&self, other: &Self) -> cmp::Ordering {
     match self.clock.cmp(&other.clock) {
       cmp::Ordering::Equal => self.peernum.cmp(&other.peernum),
       o => o,

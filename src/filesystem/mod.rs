@@ -17,6 +17,8 @@ use rwhashes::*;
 
 mod entry;
 pub use self::entry::*;
+mod vclock;
+pub use self::vclock::*;
 
 struct Handle {
   node: NodeId,
@@ -111,6 +113,7 @@ impl<'a> FS<'a> {
     let mut entry = try!(self.backing.get_node(node));
     let res = closure(&mut entry, node);
     entry.clock = self::time::get_time();
+    entry.vclock.increment(self.peernum);
     entry.peernum = self.peernum;
     if cache {
       try!(self.backing.save_node_cached(node, entry));

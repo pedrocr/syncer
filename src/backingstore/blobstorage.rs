@@ -261,14 +261,33 @@ impl BlobStorage {
     if !try!(self.metadata.node_exists(node)) {
       // this is the first of its kind push it
       try!(self.metadata.set_node(node, &hash, entry.timeval()));
+      return Ok(())
     }
     let (_, buffer) = try!(self.read_node(node));
     let currnode: FSEntry = bincode::deserialize(&buffer[..]).unwrap();
-    if currnode.cmp(entry) == cmp::Ordering::Greater {
-      // Our current node is a later one so add the new one but behind it
-      try!(self.metadata.set_node_behind(node, &hash, entry.timeval()));
-    } else {
-      try!(self.metadata.set_node(node, &hash, entry.timeval()));
+
+    match entry.cmp_vclock(&currnode) {
+      VectorOrdering::Greater => {
+        try!(self.metadata.set_node(node, &hash, entry.timeval()));
+      },
+      VectorOrdering::Less => {
+        // Our current node is a later one so add the new one but behind it
+        try!(self.metadata.set_node_behind(node, &hash, entry.timeval()));
+      },
+      VectorOrdering::Equal => {
+        eprintln!("WARNING: found a node with same vector clock that isn't identical");
+        eprintln!("first from peer {} is {:?}", entry.peernum, entry);
+        eprintln!("secon from peer {} is {:?}", currnode.peernum, currnode);
+        try!(self.metadata.set_node(node, &hash, entry.timeval()));
+      },
+      VectorOrdering::Conflict => {
+        if entry.cmp_time(&currnode) == cmp::Ordering::Greater {
+          try!(self.metadata.set_node(node, &hash, entry.timeval()));
+        } else {
+          // Our current node is a later one so add the new one but behind it
+          try!(self.metadata.set_node_behind(node, &hash, entry.timeval()));
+        }
+      },
     }
     Ok(())
   }
