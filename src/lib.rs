@@ -70,7 +70,7 @@ pub fn run(source: &Path, mount: &Path, conf: &Config) -> Result<(), Error> {
     return Err(Error::new(ErrorKind::Other, message));
   }
 
-  let bs = match BackingStore::new(&conf.peerid, conf.peernum(), source, &conf.server, conf.maxbytes) {
+  let bs = match BackingStore::new(source, &conf) {
     Ok(bs) => bs,
     Err(_) => return Err(Error::new(ErrorKind::Other, "Couldn't create the backing store")),
   };
@@ -111,12 +111,35 @@ pub fn clone(source: &Path, conf: &Config) -> Result<(), Error> {
     return Err(Error::new(ErrorKind::Other, message));
   }
 
-  let bs = match BackingStore::new(&conf.peerid, conf.peernum(), source, &conf.server, conf.maxbytes) {
+  let bs = match BackingStore::new(source, &conf) {
     Ok(bs) => bs,
     Err(_) => return Err(Error::new(ErrorKind::Other, "Couldn't create the backing store")),
   };
 
   bs.do_downloads_nodes();
+
+  Ok(())
+}
+
+pub fn init(source: &Path, conf: &Config) -> Result<(), Error> {
+  if conf.formatversion < FORMATVERSION {
+    let message = format!("Trying to clone into old format (version {} vs {})",
+                           conf.formatversion, FORMATVERSION);
+    return Err(Error::new(ErrorKind::Other, message));
+  }
+
+  let bs = match BackingStore::new(source, &conf) {
+    Ok(bs) => bs,
+    Err(_) => return Err(Error::new(ErrorKind::Other, "Couldn't create the backing store")),
+  };
+  match filesystem::FS::new(&bs, conf.peernum()) {
+    Ok(fs) => fs,
+    Err(_) => return Err(Error::new(ErrorKind::Other, "Couldn't create the filesystem")),
+  };
+
+  bs.sync_all().unwrap();
+  bs.do_uploads();
+  bs.do_uploads_nodes();
 
   Ok(())
 }

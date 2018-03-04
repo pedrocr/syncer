@@ -9,6 +9,7 @@ use self::blobstorage::*;
 pub use self::blobstorage::BlobHash;
 use super::filesystem::FSEntry;
 use rwhashes::*;
+use config::*;
 
 use self::libc::c_int;
 use std::sync::Mutex;
@@ -25,14 +26,14 @@ pub struct BackingStore {
 }
 
 impl BackingStore {
-  pub fn new(peerid: &str, peernum: i64, path: &Path, server: &str, maxbytes: u64) -> Result<Self, c_int> {
-    let bs = try!(BlobStorage::new(peerid, path, server, maxbytes));
+  pub fn new(path: &Path, config: &Config) -> Result<Self, c_int> {
+    let bs = try!(BlobStorage::new(&config.peerid, path, &config.server, config.maxbytes));
     let zero = BlobStorage::zero(1);
-    let nodecount = try!(bs.max_node(peernum)) + 1;
+    let nodecount = try!(bs.max_node(config.peernum())) + 1;
 
     let out = Self {
       blobs: bs,
-      peernum,
+      peernum: config.peernum(),
       node_counter: Mutex::new(nodecount),
       node_cache: RwHashes::new(8),
       zero: zero,

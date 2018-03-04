@@ -55,12 +55,17 @@ fn init(args: &[String], fetch: bool) {
     Err(e) => {eprintln!("ERROR: Couldn't save config file: {}", e); process::exit(3);},
   }
 
+  let mut source = path.clone();
+  source.push("data");
   if fetch {
-    let mut source = path.clone();
-    source.push("data");
     match syncer::clone(&source, &conf) {
       Ok(_) => {},
-      Err(e) => eprintln!("MOUNT ERROR: {}", e),
+      Err(e) => eprintln!("CLONE ERROR: {}", e),
+    }
+  } else {
+    match syncer::init(&source, &conf) {
+      Ok(_) => {},
+      Err(e) => eprintln!("INIT ERROR: {}", e),
     }
   }
 }
