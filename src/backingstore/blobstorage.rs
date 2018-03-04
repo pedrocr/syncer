@@ -7,6 +7,7 @@ extern crate bincode;
 extern crate crossbeam;
 
 use super::metadatadb::*;
+use super::rsync::*;
 use super::NodeId;
 use settings::*;
 use rwhashes::*;
@@ -20,11 +21,11 @@ use std::cmp;
 use std::path::{Path, PathBuf};
 use std::fs;
 use std::io::prelude::*;
+use std::io::Error;
 use std::usize;
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex, RwLock};
 use std::fs::OpenOptions;
-use std::process::Command;
 use std::io::{BufRead, BufReader, SeekFrom};
 use std::fs::File;
 
@@ -297,18 +298,13 @@ impl BlobStorage {
     }
   }
 
-  pub fn init_server(&self) {
-    for _ in 0..10 {
-      let mut cmd = self.connect_to_server();
-      cmd.arg("-r");
-      cmd.arg("--exclude=metadata*");
-      cmd.arg(&self.local);
-      cmd.arg(&self.server);
-      match cmd.status() {
-        Ok(_) => {},
-        Err(_) => eprintln!("ERROR: Failed to upload file to server"),
-      }
-    }
+  pub fn init_server(&self) -> Result<(), Error> {
+    let mut cmd = RsyncCommand::new();
+    cmd.arg("-r");
+    cmd.arg("--exclude=metadata*");
+    cmd.arg(&self.local);
+    cmd.arg(&self.server);
+    cmd.run()
   }
 
   pub fn do_uploads_nodes(&self) {
@@ -344,14 +340,12 @@ impl BlobStorage {
     if written {
       let mut remote = self.server.clone();
       remote.push_str(&"/data/nodes/");
-      for _ in 0..10 {
-        let mut cmd = self.connect_to_server();
-        cmd.arg(&path);
-        cmd.arg(&remote);
-        match cmd.status() {
-          Ok(_) => {},
-          Err(_) => eprintln!("ERROR: Failed to upload file to server"),
-        }
+      let mut cmd = RsyncCommand::new();
+      cmd.arg(&path);
+      cmd.arg(&remote);
+      match cmd.run() {
+        Ok(_) => return,
+        Err(_) => eprintln!("ERROR: Failed to upload file to server"),
       }
     }
   }
@@ -363,16 +357,14 @@ impl BlobStorage {
     remote.push_str(&"/data/nodes/");
 
     // First fetch all the nodes files in the server except our own
-    for _ in 0..10 {
-      let mut cmd = self.connect_to_server();
-      cmd.arg("-r");
-      cmd.arg(format!("--exclude={}", self.peerid));
-      cmd.arg(&remote);
-      cmd.arg(&path);
-      match cmd.status() {
-        Ok(_) => {},
-        Err(_) => eprintln!("ERROR: Failed to downlad node files from server"),
-      }
+    let mut cmd = RsyncCommand::new();
+    cmd.arg("-r");
+    cmd.arg(format!("--exclude={}", self.peerid));
+    cmd.arg(&remote);
+    cmd.arg(&path);
+    match cmd.run() {
+      Ok(_) => {},
+      Err(_) => eprintln!("ERROR: Failed to downlad node files from server"),
     }
 
     for file in fs::read_dir(&path).unwrap() {
@@ -464,23 +456,21 @@ impl BlobStorage {
   }
 
   pub fn upload_to_server(&self, hashes: &[BlobHash]) -> Result<(), c_int> {
-    for _ in 0..10 {
-      let mut cmd = self.connect_to_server();
-      for hash in hashes {
-        let path = self.local_path(hash);
-        if !path.exists() {
-          eprintln!("ERROR: couldn't find file {:?} to upload!", path);
-        } else {
-          cmd.arg(&path);
-        }
+    let mut cmd = RsyncCommand::new();
+    for hash in hashes {
+      let path = self.local_path(hash);
+      if !path.exists() {
+        eprintln!("ERROR: couldn't find file {:?} to upload!", path);
+      } else {
+        cmd.arg(&path);
       }
-      let mut remote = self.server.clone();
-      remote.push_str(&"/data/blobs/");
-      cmd.arg(&remote);
-      match cmd.status() {
-        Ok(_) => return Ok(()),
-        Err(_) => {},
-      }
+    }
+    let mut remote = self.server.clone();
+    remote.push_str(&"/data/blobs/");
+    cmd.arg(&remote);
+    match cmd.run() {
+      Ok(_) => return Ok(()),
+      Err(_) => {},
     }
     eprintln!("ERROR: Failed to upload blocks to server");
     Err(libc::EIO)
@@ -544,28 +534,14 @@ impl BlobStorage {
 
   fn real_fetch_from_server(&self, hash: &BlobHash) -> bool {
     let remote = self.remote_path(hash);
-    for _ in 0..10 {
-      let mut cmd = self.connect_to_server();
-      cmd.arg(&remote);
-      let mut path = self.local.clone();
-      path.push("blobs");
-      cmd.arg(&path);
-      match cmd.status() {
-        Ok(_) => return true,
-        Err(_) => {},
-      }
+    let mut cmd = RsyncCommand::new();
+    cmd.arg(&remote);
+    let mut path = self.local.clone();
+    path.push("blobs");
+    cmd.arg(&path);
+    match cmd.run() {
+      Ok(_) => true,
+      Err(_) => false,
     }
-    eprintln!("Failed to get block from server");
-    false
-  }
-
-  fn connect_to_server(&self) -> Command {
-    let mut cmd = Command::new("rsync");
-    cmd.arg("--quiet");
-    cmd.arg("--timeout=5");
-    // --whole-file is needed instead of --append because otherwise concurrent usage while
-    // doing readhead causes short blocks
-    cmd.arg("--whole-file");
-    cmd
   }
 }

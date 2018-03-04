@@ -4,6 +4,7 @@ extern crate crossbeam;
 
 mod blobstorage;
 mod metadatadb;
+mod rsync;
 
 use self::blobstorage::*;
 pub use self::blobstorage::BlobHash;
@@ -14,6 +15,7 @@ use config::*;
 use self::libc::c_int;
 use std::sync::Mutex;
 use std::path::Path;
+use std::io::Error;
 
 pub type NodeId = (i64, i64);
 
@@ -156,10 +158,11 @@ impl BackingStore {
     self.blobs.do_removals();
   }
 
-  pub fn init_server(&self) {
-    self.blobs.init_server();
+  pub fn init_server(&self) -> Result<(), Error> {
+    try!(self.blobs.init_server());
     self.sync_all().unwrap();
     self.do_uploads();
     self.do_uploads_nodes();
+    Ok(())
   }
 }
