@@ -137,9 +137,7 @@ pub fn init(source: &Path, conf: &Config) -> Result<(), Error> {
     Err(_) => return Err(Error::new(ErrorKind::Other, "Couldn't create the filesystem")),
   };
 
-  bs.sync_all().unwrap();
-  bs.do_uploads();
-  bs.do_uploads_nodes();
+  bs.init_server();
 
   Ok(())
 }

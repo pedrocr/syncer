@@ -297,6 +297,20 @@ impl BlobStorage {
     }
   }
 
+  pub fn init_server(&self) {
+    for _ in 0..10 {
+      let mut cmd = self.connect_to_server();
+      cmd.arg("-r");
+      cmd.arg("--exclude=metadata*");
+      cmd.arg(&self.local);
+      cmd.arg(&self.server);
+      match cmd.status() {
+        Ok(_) => {},
+        Err(_) => eprintln!("ERROR: Failed to upload file to server"),
+      }
+    }
+  }
+
   pub fn do_uploads_nodes(&self) {
     let mut path = self.local.clone();
     path.push("nodes");
@@ -329,7 +343,7 @@ impl BlobStorage {
 
     if written {
       let mut remote = self.server.clone();
-      remote.push_str(&"/nodes/");
+      remote.push_str(&"/data/nodes/");
       for _ in 0..10 {
         let mut cmd = self.connect_to_server();
         cmd.arg(&path);
@@ -346,7 +360,7 @@ impl BlobStorage {
     let mut path = self.local.clone();
     path.push("nodes");
     let mut remote = self.server.clone();
-    remote.push_str(&"/nodes/");
+    remote.push_str(&"/data/nodes/");
 
     // First fetch all the nodes files in the server except our own
     for _ in 0..10 {
@@ -444,7 +458,7 @@ impl BlobStorage {
 
   fn remote_path(&self, hash: &BlobHash) -> String {
     let mut remote = self.server.clone();
-    remote.push_str(&"/blobs/");
+    remote.push_str(&"/data/blobs/");
     remote.push_str(&hex::encode(hash));
     remote
   }
@@ -461,7 +475,7 @@ impl BlobStorage {
         }
       }
       let mut remote = self.server.clone();
-      remote.push_str(&"/blobs/");
+      remote.push_str(&"/data/blobs/");
       cmd.arg(&remote);
       match cmd.status() {
         Ok(_) => return Ok(()),

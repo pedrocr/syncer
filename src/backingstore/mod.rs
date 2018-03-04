@@ -155,4 +155,11 @@ impl BackingStore {
   pub fn do_removals(&self) {
     self.blobs.do_removals();
   }
+
+  pub fn init_server(&self) {
+    self.blobs.init_server();
+    self.sync_all().unwrap();
+    self.do_uploads();
+    self.do_uploads_nodes();
+  }
 }
