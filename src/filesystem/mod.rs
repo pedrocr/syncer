@@ -24,14 +24,16 @@ struct Handle {
 }
 
 pub struct FS<'a> {
+  peernum: i64,
   backing: &'a BackingStore,
   handles: RwHashes<u64,Handle>,
   handle_counter: Mutex<u64>,
 }
 
 impl<'a> FS<'a> {
-  pub fn new(bs: &'a BackingStore) -> Result<FS<'a>, c_int> {
+  pub fn new(bs: &'a BackingStore, peernum: i64) -> Result<FS<'a>, c_int> {
     let fs = FS {
+      peernum: peernum,
       backing: bs,
       handles: RwHashes::new(8),
       handle_counter: Mutex::new(0),
@@ -39,7 +41,7 @@ impl<'a> FS<'a> {
 
     // Add a root node as 0 if it doesn't exist
     if !try!(fs.backing.node_exists((0,0))) {
-      let mut root = FSEntry::new(FileTypeDef::Directory);
+      let mut root = FSEntry::new(FileTypeDef::Directory, peernum);
       root.perm = 0o755;
       root.uid = users::get_current_uid();
       root.gid = users::get_current_gid();
@@ -108,6 +110,8 @@ impl<'a> FS<'a> {
     where F : Fn(&mut FSEntry, NodeId) -> T {
     let mut entry = try!(self.backing.get_node(node));
     let res = closure(&mut entry, node);
+    entry.clock = self::time::get_time();
+    entry.peernum = self.peernum;
     if cache {
       try!(self.backing.save_node_cached(node, entry));
     } else {
@@ -218,7 +222,7 @@ impl<'a> FilesystemMT for FS<'a> {
   fn create(&self, _req: RequestInfo, parent: &Path, name: &OsStr, mode: u32, flags: u32) -> ResultCreate {
     let node = try!(self.find_node(parent));
     let entry = try!(self.with_node(node, &(|parent, _| {
-      let mut e = FSEntry::new(FileTypeDef::RegularFile);
+      let mut e = FSEntry::new(FileTypeDef::RegularFile, self.peernum);
       e.perm = mode;
       e.gid = parent.gid;
       e.uid = parent.uid;
@@ -239,7 +243,7 @@ impl<'a> FilesystemMT for FS<'a> {
   fn mkdir(&self, _req: RequestInfo, parent: &Path, name: &OsStr, mode: u32) -> ResultEntry {
     let node = try!(self.find_node(parent));
     let entry = try!(self.with_node(node, &(|parent, _| {
-      let mut e = FSEntry::new(FileTypeDef::Directory);
+      let mut e = FSEntry::new(FileTypeDef::Directory, self.peernum);
       e.perm = mode;
       e.gid = parent.gid;
       e.uid = parent.uid;
@@ -256,7 +260,7 @@ impl<'a> FilesystemMT for FS<'a> {
     let data = target.as_os_str().as_bytes();
     let blob = try!(self.backing.add_blob(&data));
     let entry = try!(self.with_node(node, &(|parent, _| {
-      let mut e = FSEntry::new(FileTypeDef::Symlink);
+      let mut e = FSEntry::new(FileTypeDef::Symlink, self.peernum);
       e.blocks = vec![blob];
       e.perm = 0o777;
       e.size = data.len() as u64;

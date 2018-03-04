@@ -74,7 +74,7 @@ pub fn run(source: &Path, mount: &Path, conf: &Config) -> Result<(), Error> {
     Ok(bs) => bs,
     Err(_) => return Err(Error::new(ErrorKind::Other, "Couldn't create the backing store")),
   };
-  let fs = match filesystem::FS::new(&bs) {
+  let fs = match filesystem::FS::new(&bs, conf.peernum()) {
     Ok(fs) => fs,
     Err(_) => return Err(Error::new(ErrorKind::Other, "Couldn't create the filesystem")),
   };

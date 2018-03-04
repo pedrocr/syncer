@@ -119,6 +119,14 @@ impl MetadataDB {
     Ok(count > 0)
   }
 
+  pub fn node_exists_long(&self, node: NodeId, hash: &BlobHash, creation: i64) -> Result<bool, c_int> {
+    let conn = self.connection.lock().unwrap();
+    let count: i64 = dberror_return!(conn.query_row(
+      "SELECT count(*) FROM nodes WHERE peernum=?1 AND id=?2 AND hash=?3 AND creation=?4 LIMIT 1",
+      &[&node.0, &node.1, &(hex::encode(hash)), &creation], |row| row.get(0)));
+    Ok(count > 0)
+  }
+
   pub fn get_node(&self, node: NodeId) -> Result<BlobHash, c_int> {
     let conn = self.connection.lock().unwrap();
     let hash: String = dberror_return!(conn.query_row(
@@ -148,6 +156,25 @@ impl MetadataDB {
     dberror_return!(conn.execute(
       "INSERT INTO nodes (peernum, id, hash, creation, synced) VALUES (?1, ?2, ?3, ?4, 0)",
       &[&node.0, &node.1, &(hex::encode(hash)), &creation]));
+    Ok(())
+  }
+
+  pub fn set_node_behind(&self, node: NodeId, hash: &BlobHash, creation: i64) -> Result<(), c_int> {
+    let mut conn = self.connection.lock().unwrap();
+    let tran = conn.transaction().unwrap();
+    let (rowid, oldhash, oldcreation): (i64, String, i64) = dberror_return!(tran.query_row(
+      "SELECT rowid, hash, creation FROM nodes WHERE peernum=?1 AND id=?2 ORDER BY rowid DESC LIMIT 1",
+      &[&node.0, &node.1], |row| (row.get(0), row.get(1), row.get(2))));
+    dberror_return!(tran.execute(
+      "DELETE FROM nodes WHERE rowid=?1",
+      &[&rowid]));
+    dberror_return!(tran.execute(
+      "INSERT INTO nodes (peernum, id, hash, creation, synced) VALUES (?1, ?2, ?3, ?4, 0)",
+      &[&node.0, &node.1, &(hex::encode(hash)), &creation]));
+    dberror_return!(tran.execute(
+      "INSERT INTO nodes (peernum, id, hash, creation, synced) VALUES (?1, ?2, ?3, ?4, 0)",
+      &[&node.0, &node.1, &oldhash, &oldcreation]));
+    tran.commit().unwrap();
     Ok(())
   }
 
@@ -337,6 +364,33 @@ mod tests {
     assert_eq!(1, db.to_upload_nodes().len());
   }
 
+  #[test]
+  fn node_exists_long() {
+    let conn = Connection::open_in_memory().unwrap();
+    let db = MetadataDB::new(conn);
+    let from_hash1 = [1;HASHSIZE];
+    let from_hash2 = [2;HASHSIZE];
+    let time1 = timeval();
+    let time2 = time1+1;
+    assert_eq!(db.node_exists_long((0,0), &from_hash1, time1).unwrap(), false);
+    db.set_node((0,0), &from_hash2, time2).unwrap();
+    assert_eq!(db.node_exists_long((0,0), &from_hash1, time1).unwrap(), false);
+    assert_eq!(db.node_exists_long((0,0), &from_hash2, time1).unwrap(), false);
+    assert_eq!(db.node_exists_long((0,0), &from_hash1, time2).unwrap(), false);
+    assert_eq!(db.node_exists_long((0,0), &from_hash2, time2).unwrap(), true);
+  }
+
+  #[test]
+  fn set_node_behind() {
+    let conn = Connection::open_in_memory().unwrap();
+    let db = MetadataDB::new(conn);
+    assert_eq!(db.node_exists((0,0)).unwrap(), false);
+    let from_hash1 = [1;HASHSIZE];
+    let from_hash2 = [2;HASHSIZE];
+    db.set_node((0,0), &from_hash1, timeval()).unwrap();
+    db.set_node_behind((0,0), &from_hash2, timeval()).unwrap();
+    assert_eq!(from_hash1, db.get_node((0,0)).unwrap());
+  }
 
   #[test]
   fn maxnode() {

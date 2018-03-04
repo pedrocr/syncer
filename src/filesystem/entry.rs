@@ -47,6 +47,10 @@ impl FileTypeDef {
 
 #[derive(Clone, Serialize, Deserialize)]
 pub struct FSEntry {
+  #[serde(with = "TimespecDef")]
+  pub clock: Timespec,
+  pub peernum: i64,
+
   pub filetype: FileTypeDef,
   pub perm: u32,
   pub uid: u32,
@@ -76,10 +80,12 @@ pub fn from_os_str(ostr: &OsStr) -> Result<String, c_int> {
 }
 
 impl FSEntry {
-  pub fn new(filetype: FileTypeDef) -> FSEntry {
+  pub fn new(filetype: FileTypeDef, peernum: i64) -> FSEntry {
     let time = self::time::get_time();
 
     FSEntry {
+      clock: time,
+      peernum: peernum,
       filetype: filetype,
       perm: 0,
       uid: 0,
@@ -204,5 +210,16 @@ impl FSEntry {
 
   pub fn get_blocks(&self) -> &Vec<BlobHash> {
     &self.blocks
+  }
+
+  pub fn cmp(&self, other: &Self) -> cmp::Ordering {
+    match self.clock.cmp(&other.clock) {
+      cmp::Ordering::Equal => self.peernum.cmp(&other.peernum),
+      o => o,
+    }
+  }
+
+  pub fn timeval(&self) -> i64 {
+    self.clock.sec * 1000 + (self.clock.nsec as i64)/1000000
   }
 }

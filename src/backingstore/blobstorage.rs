@@ -253,7 +253,22 @@ impl BlobStorage {
   pub fn save_node(&self, node: NodeId, entry: &FSEntry) -> Result<(), c_int> {
     let encoded: Vec<u8> = bincode::serialize(&entry).unwrap();
     let hash = try!(self.add_blob(&encoded));
-    try!(self.metadata.set_node(node, &hash, timeval()));
+    if try!(self.metadata.node_exists_long(node, &hash, entry.timeval())) {
+      // this is a duplicate, skip it
+      return Ok(())
+    }
+    if !try!(self.metadata.node_exists(node)) {
+      // this is the first of its kind push it
+      try!(self.metadata.set_node(node, &hash, entry.timeval()));
+    }
+    let (_, buffer) = try!(self.read_node(node));
+    let currnode: FSEntry = bincode::deserialize(&buffer[..]).unwrap();
+    if currnode.cmp(entry) == cmp::Ordering::Greater {
+      // Our current node is a later one so add the new one but behind it
+      try!(self.metadata.set_node_behind(node, &hash, entry.timeval()));
+    } else {
+      try!(self.metadata.set_node(node, &hash, entry.timeval()));
+    }
     Ok(())
   }
 
