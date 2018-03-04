@@ -10,7 +10,6 @@ pub use self::blobstorage::BlobHash;
 use super::filesystem::FSEntry;
 use rwhashes::*;
 
-use self::bincode::{serialize, deserialize};
 use self::libc::c_int;
 use std::sync::Mutex;
 use std::path::Path;
@@ -61,9 +60,7 @@ impl BackingStore {
   }
 
   pub fn save_node(&self, node: NodeId, entry: FSEntry) -> Result<(), c_int> {
-    let encoded: Vec<u8> = serialize(&entry).unwrap();
-    try!(self.blobs.add_node(node, &encoded));
-    Ok(())
+    self.blobs.save_node(node, &entry)
   }
 
   pub fn save_node_cached(&self, node: NodeId, entry: FSEntry) -> Result<(), c_int> {
@@ -86,7 +83,7 @@ impl BackingStore {
 
   pub fn fetch_node(&self, node: NodeId) -> Result<(BlobHash, FSEntry), c_int> {
     let (hash, buffer) = try!(self.blobs.read_node(node));
-    Ok((hash, deserialize(&buffer[..]).unwrap()))
+    Ok((hash, bincode::deserialize(&buffer[..]).unwrap()))
   }
 
   pub fn node_exists(&self, node: NodeId) -> Result<bool, c_int> {

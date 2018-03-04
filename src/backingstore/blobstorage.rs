@@ -11,6 +11,7 @@ use super::NodeId;
 use settings::*;
 use rwhashes::*;
 use config::*;
+use filesystem::*;
 use self::rusqlite::Connection;
 use self::blake2::Blake2b;
 use self::blake2::digest::{Input, VariableOutput};
@@ -249,10 +250,11 @@ impl BlobStorage {
     self.metadata.max_node(peernum)
   }
 
-  pub fn add_node(&self, node: NodeId, data: &[u8]) -> Result<BlobHash, c_int> {
-    let hash = try!(self.add_blob(data));
+  pub fn save_node(&self, node: NodeId, entry: &FSEntry) -> Result<(), c_int> {
+    let encoded: Vec<u8> = bincode::serialize(&entry).unwrap();
+    let hash = try!(self.add_blob(&encoded));
     try!(self.metadata.set_node(node, &hash, timeval()));
-    Ok(hash)
+    Ok(())
   }
 
   pub fn read_node(&self, node: NodeId) -> Result<(BlobHash, Vec<u8>), c_int> {
@@ -361,7 +363,9 @@ impl BlobStorage {
         offset += line.len() as u64 + 1;
         let buffer = base64::decode(&line).unwrap();
         let node: NodeInfo = bincode::deserialize(&buffer).unwrap();
-        self.metadata.set_node(node.id, &node.hash, node.creation).unwrap();
+        let blob = self.get_blob(&node.hash, &[]).unwrap();
+        let entry: FSEntry = bincode::deserialize(&blob.read(0, usize::MAX)).unwrap();
+        self.save_node(node.id, &entry).unwrap();
         self.metadata.set_peer(peernum, offset).unwrap();
       }
     }
