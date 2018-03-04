@@ -263,8 +263,12 @@ impl BlobStorage {
       try!(self.metadata.set_node(node, &hash, entry.timeval()));
       return Ok(())
     }
-    let (_, buffer) = try!(self.read_node(node));
+    let (hash2, buffer) = try!(self.read_node(node));
     let currnode: FSEntry = bincode::deserialize(&buffer[..]).unwrap();
+    if &currnode == entry {
+      // this is a duplicate whose hash didn't match, skip it
+      return Ok(())
+    }
 
     match entry.cmp_vclock(&currnode) {
       VectorOrdering::Greater => {
@@ -275,9 +279,11 @@ impl BlobStorage {
         try!(self.metadata.set_node_behind(node, &hash, entry.timeval()));
       },
       VectorOrdering::Equal => {
-        eprintln!("WARNING: found a node with same vector clock that isn't identical");
-        eprintln!("first from peer {} is {:?}", entry.peernum, entry);
-        eprintln!("secon from peer {} is {:?}", currnode.peernum, currnode);
+        eprintln!("WARNING: found node {:?} with same vector clock that isn't identical", node);
+        eprintln!("1st hash is {}", hex::encode(&hash));
+        eprintln!("2nd hash is {}", hex::encode(&hash2));
+        eprintln!("1st from peer {} is {:?}", entry.peernum, entry);
+        eprintln!("2nd from peer {} is {:?}", currnode.peernum, currnode);
         try!(self.metadata.set_node(node, &hash, entry.timeval()));
       },
       VectorOrdering::Conflict => {

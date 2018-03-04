@@ -46,7 +46,7 @@ impl FileTypeDef {
   }
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct FSEntry {
   #[serde(with = "TimespecDef")]
   pub clock: Timespec,
@@ -228,5 +228,25 @@ impl FSEntry {
 
   pub fn timeval(&self) -> i64 {
     self.clock.sec * 1000 + (self.clock.nsec as i64)/1000000
+  }
+}
+
+#[cfg(test)]
+mod tests {
+  use super::*;
+  extern crate bincode;
+
+  #[test]
+  fn serialization_roundtrips() {
+    let mut entry = FSEntry::new(FileTypeDef::Directory, 0);
+    entry.vclock.increment(0);
+    entry.vclock.increment(1);
+    let encoded: Vec<u8> = bincode::serialize(&entry).unwrap();
+    let entry2: FSEntry = bincode::deserialize(&encoded).unwrap();
+    //let encoded2: Vec<u8> = bincode::serialize(&entry2).unwrap();
+
+    assert_eq!(entry, entry2);
+    // This won't work because of https://github.com/TyOverby/bincode/issues/230
+    //assert_eq!(encoded, encoded2);
   }
 }
