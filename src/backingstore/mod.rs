@@ -15,7 +15,7 @@ use config::*;
 use self::libc::c_int;
 use std::sync::Mutex;
 use std::path::Path;
-use std::io::Error;
+use std::io::{Error, ErrorKind};
 
 pub type NodeId = (i64, i64);
 
@@ -122,11 +122,14 @@ impl BackingStore {
     Ok(())
   }
 
-  pub fn sync_all(&self) -> Result<(), c_int> {
+  pub fn sync_all(&self) -> Result<(), Error> {
     for i in 0..self.node_cache.len() {
       let mut nodes = self.node_cache.write_pos(i);
       for (node, entry) in nodes.drain() {
-        try!(self.sync_one_node(node, entry));
+        match self.sync_one_node(node, entry) {
+          Ok(_) => {},
+          Err(_) => return Err(Error::new(ErrorKind::Other, "sync failed")),
+        }
       }
     }
     self.blobs.do_save();
@@ -142,27 +145,30 @@ impl BackingStore {
     Ok(())
   }
 
-  pub fn do_uploads(&self) {
-    self.blobs.do_uploads();
+  pub fn do_uploads(&self) -> Result<(), Error> {
+    match self.blobs.do_uploads() {
+      Ok(_) => Ok(()),
+      Err(_) => Err(Error::new(ErrorKind::Other, "upload failed")),
+    }
   }
 
-  pub fn do_uploads_nodes(&self) {
-    self.blobs.do_uploads_nodes();
+  pub fn do_uploads_nodes(&self) -> Result<(), Error> {
+    self.blobs.do_uploads_nodes()
   }
 
-  pub fn do_downloads_nodes(&self) {
-    self.blobs.do_downloads_nodes();
+  pub fn do_downloads_nodes(&self) -> Result<(), Error> {
+    self.blobs.do_downloads_nodes()
   }
 
-  pub fn do_removals(&self) {
-    self.blobs.do_removals();
+  pub fn do_removals(&self) -> Result<(), Error> {
+    self.blobs.do_removals()
   }
 
   pub fn init_server(&self) -> Result<(), Error> {
     try!(self.blobs.init_server());
-    self.sync_all().unwrap();
-    self.do_uploads();
-    self.do_uploads_nodes();
+    try!(self.sync_all());
+    try!(self.do_uploads());
+    try!(self.do_uploads_nodes());
     Ok(())
   }
 }

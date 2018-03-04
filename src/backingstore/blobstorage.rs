@@ -288,14 +288,14 @@ impl BlobStorage {
     self.metadata.set_blobs(written_blobs.drain(..));
   }
 
-  pub fn do_uploads(&self) {
+  pub fn do_uploads(&self) -> Result<(), c_int> {
     loop {
       let mut hashes = self.metadata.to_upload();
       if hashes.len() == 0 { break }
-      if self.upload_to_server(&hashes).is_ok() {
-        self.metadata.mark_synced_blobs(hashes.drain(..));
-      }
+      try!(self.upload_to_server(&hashes));
+      self.metadata.mark_synced_blobs(hashes.drain(..));
     }
+    Ok(())
   }
 
   pub fn init_server(&self) -> Result<(), Error> {
@@ -307,7 +307,7 @@ impl BlobStorage {
     cmd.run()
   }
 
-  pub fn do_uploads_nodes(&self) {
+  pub fn do_uploads_nodes(&self) -> Result<(), Error> {
     let mut path = self.local.clone();
     path.push("nodes");
     path.push(&self.peerid.to_string());
@@ -343,14 +343,13 @@ impl BlobStorage {
       let mut cmd = RsyncCommand::new();
       cmd.arg(&path);
       cmd.arg(&remote);
-      match cmd.run() {
-        Ok(_) => return,
-        Err(_) => eprintln!("ERROR: Failed to upload file to server"),
-      }
+      return cmd.run();
     }
+
+    Ok(())
   }
 
-  pub fn do_downloads_nodes(&self) {
+  pub fn do_downloads_nodes(&self) -> Result<(), Error> {
     let mut path = self.local.clone();
     path.push("nodes");
     let mut remote = self.server.clone();
@@ -362,10 +361,7 @@ impl BlobStorage {
     cmd.arg(format!("--exclude={}", self.peerid));
     cmd.arg(&remote);
     cmd.arg(&path);
-    match cmd.run() {
-      Ok(_) => {},
-      Err(_) => eprintln!("ERROR: Failed to downlad node files from server"),
-    }
+    try!(cmd.run());
 
     for file in fs::read_dir(&path).unwrap() {
       let path = file.unwrap().path();
@@ -390,9 +386,11 @@ impl BlobStorage {
         self.metadata.set_peer(peernum, offset).unwrap();
       }
     }
+
+    Ok(())
   }
 
-  pub fn do_removals(&self) {
+  pub fn do_removals(&self) -> Result<(), Error> {
     {
       let mut touched = self.touched_blobs.write().unwrap();
       self.metadata.touch_blobs(touched.drain());
@@ -400,7 +398,7 @@ impl BlobStorage {
 
     let bytes_to_delete = {
       let localbytes = self.metadata.localbytes();
-      if localbytes > self.maxbytes { localbytes - self.maxbytes } else { return; }
+      if localbytes > self.maxbytes { localbytes - self.maxbytes } else { return Ok(()) }
     };
 
     let mut deleted_bytes = 0;
@@ -435,6 +433,8 @@ impl BlobStorage {
         break
       }
     }
+
+    Ok(())
   }
 
   pub fn local_path(&self, hash: &BlobHash) -> PathBuf {

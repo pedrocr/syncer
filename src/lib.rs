@@ -35,7 +35,7 @@ struct BackgroundThread {
 
 impl BackgroundThread {
   fn new<'a, F: 'a>(scope: &crossbeam::Scope<'a>, secs: u64, closure: F) -> Self
-  where F: Fn()+Send {
+  where F: Fn() -> Result<(), Error> + Send {
     let (tx, rx) = mpsc::channel();
 
     let handle = scope.spawn(move || {
@@ -44,7 +44,10 @@ impl BackgroundThread {
       loop {
         match rx.recv_timeout(dur) {
           Err(mpsc::RecvTimeoutError::Timeout) => {
-            closure();
+            match closure() {
+              Ok(_) => {},
+              Err(e) => eprintln!("ERROR: {}", e),
+            }
           },
           _ => break,
         }
@@ -82,7 +85,7 @@ pub fn run(source: &Path, mount: &Path, conf: &Config) -> Result<(), Error> {
   let bsref = &bs;
 
   crossbeam::scope(|scope| {
-    let sync   = BackgroundThread::new(&scope, 60, move || bsref.sync_all().unwrap());
+    let sync   = BackgroundThread::new(&scope, 60, move || bsref.sync_all());
     let upload = BackgroundThread::new(&scope, 10, move || bsref.do_uploads());
     let nodes1 = BackgroundThread::new(&scope, 10, move || bsref.do_uploads_nodes());
     let nodes2 = BackgroundThread::new(&scope, 10, move || bsref.do_downloads_nodes());
@@ -116,7 +119,7 @@ pub fn clone(source: &Path, conf: &Config) -> Result<(), Error> {
     Err(_) => return Err(Error::new(ErrorKind::Other, "Couldn't create the backing store")),
   };
 
-  bs.do_downloads_nodes();
+  try!(bs.do_downloads_nodes());
 
   Ok(())
 }
