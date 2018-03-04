@@ -26,7 +26,7 @@ pub fn convert_peerid(peerid: &str) -> i64 {
   let mut val: u64 = 0;
   for v in vals {
     val <<= 8;
-    val & (v as u64);
+    val |= v as u64;
   }
   val as i64
 }
@@ -87,5 +87,17 @@ impl Config {
 
   pub fn peernum(&self) -> i64 {
     convert_peerid(&self.peerid)
+  }
+}
+
+#[cfg(test)]
+mod tests {
+  use super::*;
+
+  #[test]
+  fn peernum_roundtrips() {
+    let vals = [1,1,1,1];
+    let text = hex::encode(&vals);
+    assert_eq!(16843009, convert_peerid(&text));
   }
 }
