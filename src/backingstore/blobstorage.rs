@@ -265,11 +265,6 @@ impl BlobStorage {
     }
     let (hash2, buffer) = try!(self.read_node(node));
     let currnode: FSEntry = bincode::deserialize(&buffer[..]).unwrap();
-    if &currnode == entry {
-      // this is a duplicate whose hash didn't match, skip it
-      return Ok(())
-    }
-
     match entry.cmp_vclock(&currnode) {
       VectorOrdering::Greater => {
         try!(self.metadata.set_node(node, &hash, entry.timeval()));

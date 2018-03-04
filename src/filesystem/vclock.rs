@@ -1,4 +1,7 @@
-use std::collections::HashMap;
+// Not using HashMap because of https://github.com/TyOverby/bincode/issues/230
+extern crate indexmap;
+use self::indexmap::IndexMap;
+
 use std::cmp::Ordering;
 
 #[derive(Debug, PartialEq, Clone)]
@@ -11,13 +14,13 @@ pub enum VectorOrdering {
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct VectorClock {
-  peers: HashMap<i64, u64>,
+  peers: IndexMap<i64, u64>,
 }
 
 impl VectorClock {
   pub fn new() -> Self {
     Self {
-      peers: HashMap::new(),
+      peers: IndexMap::new(),
     }
   }
 
@@ -93,10 +96,9 @@ mod tests {
     vclock.increment(0);
     let encoded: Vec<u8> = bincode::serialize(&vclock).unwrap();
     let vclock2: VectorClock = bincode::deserialize(&encoded).unwrap();
-    //let encoded2: Vec<u8> = bincode::serialize(&vclock2).unwrap();
+    let encoded2: Vec<u8> = bincode::serialize(&vclock2).unwrap();
 
     assert_eq!(vclock, vclock2);
-    // This won't work because of https://github.com/TyOverby/bincode/issues/230
-    // assert_eq!(encoded, encoded2);
+    assert_eq!(encoded, encoded2);
   }
 }

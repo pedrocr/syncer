@@ -4,9 +4,11 @@ extern crate libc;
 use self::libc::c_int;
 extern crate time;
 use self::time::Timespec;
+// Not using HashMap because of https://github.com/TyOverby/bincode/issues/230
+extern crate indexmap;
+use self::indexmap::IndexMap;
 
 use std::ffi::{OsStr, OsString};
-use std::collections::HashMap;
 use std::cmp;
 
 use super::vclock::*;
@@ -73,8 +75,8 @@ pub struct FSEntry {
   pub bkuptime: Timespec,
   pub size: u64,
   pub blocks: Vec<BlobHash>,
-  pub children: HashMap<String, (NodeId, FileTypeDef)>,
-  pub xattrs: HashMap<String, Vec<u8>>,
+  pub children: IndexMap<String, (NodeId, FileTypeDef)>,
+  pub xattrs: IndexMap<String, Vec<u8>>,
 }
 
 pub fn from_os_str(ostr: &OsStr) -> Result<String, c_int> {
@@ -103,8 +105,8 @@ impl FSEntry {
       bkuptime: time,
       size: 0,
       blocks: Vec::new(),
-      children: HashMap::new(),
-      xattrs: HashMap::new(),
+      children: IndexMap::new(),
+      xattrs: IndexMap::new(),
     }
   }
 
@@ -243,10 +245,9 @@ mod tests {
     entry.vclock.increment(1);
     let encoded: Vec<u8> = bincode::serialize(&entry).unwrap();
     let entry2: FSEntry = bincode::deserialize(&encoded).unwrap();
-    //let encoded2: Vec<u8> = bincode::serialize(&entry2).unwrap();
+    let encoded2: Vec<u8> = bincode::serialize(&entry2).unwrap();
 
     assert_eq!(entry, entry2);
-    // This won't work because of https://github.com/TyOverby/bincode/issues/230
-    //assert_eq!(encoded, encoded2);
+    assert_eq!(encoded, encoded2);
   }
 }
