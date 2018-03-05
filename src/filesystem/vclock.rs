@@ -1,8 +1,6 @@
-// Not using HashMap because of https://github.com/TyOverby/bincode/issues/230
-extern crate indexmap;
-use self::indexmap::IndexMap;
-
 use std::cmp::Ordering;
+// Not using HashMap because of https://github.com/TyOverby/bincode/issues/230
+use std::collections::BTreeMap;
 
 #[derive(Debug, PartialEq, Clone)]
 pub enum VectorOrdering {
@@ -14,13 +12,13 @@ pub enum VectorOrdering {
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct VectorClock {
-  peers: IndexMap<i64, u64>,
+  peers: BTreeMap<i64, u64>,
 }
 
 impl VectorClock {
   pub fn new() -> Self {
     Self {
-      peers: IndexMap::new(),
+      peers: BTreeMap::new(),
     }
   }
 

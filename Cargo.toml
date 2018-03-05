@@ -23,9 +23,5 @@ toml = "0.4"
 base64 = "0.9"
 rand = "0.4"
 
-[dependencies.indexmap]
-version = "0.4"
-features = ["serde-1"]
-
 [profile.dev]
 opt-level = 3

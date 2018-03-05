@@ -4,12 +4,11 @@ extern crate libc;
 use self::libc::c_int;
 extern crate time;
 use self::time::Timespec;
-// Not using HashMap because of https://github.com/TyOverby/bincode/issues/230
-extern crate indexmap;
-use self::indexmap::IndexMap;
 
 use std::ffi::{OsStr, OsString};
 use std::cmp;
+// Not using HashMap because of https://github.com/TyOverby/bincode/issues/230
+use std::collections::BTreeMap;
 
 use super::vclock::*;
 use backingstore::*;
@@ -75,8 +74,8 @@ pub struct FSEntry {
   pub bkuptime: Timespec,
   pub size: u64,
   pub blocks: Vec<BlobHash>,
-  pub children: IndexMap<String, (NodeId, FileTypeDef)>,
-  pub xattrs: IndexMap<String, Vec<u8>>,
+  pub children: BTreeMap<String, (NodeId, FileTypeDef)>,
+  pub xattrs: BTreeMap<String, Vec<u8>>,
 }
 
 pub fn from_os_str(ostr: &OsStr) -> Result<String, c_int> {
@@ -105,8 +104,8 @@ impl FSEntry {
       bkuptime: time,
       size: 0,
       blocks: Vec::new(),
-      children: IndexMap::new(),
-      xattrs: IndexMap::new(),
+      children: BTreeMap::new(),
+      xattrs: BTreeMap::new(),
     }
   }
 
