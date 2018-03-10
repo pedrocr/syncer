@@ -47,6 +47,16 @@ impl FileTypeDef {
   }
 }
 
+macro_rules! merge_3way {
+  ($base:expr, $left:expr, $right:expr) => {
+    if $left == $base {
+      $right.clone()
+    } else {
+      $left.clone()
+    }
+  }
+}
+
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct FSEntry {
   #[serde(with = "TimespecDef")]
@@ -230,6 +240,38 @@ impl FSEntry {
   pub fn timeval(&self) -> i64 {
     self.clock.sec * 1000 + (self.clock.nsec as i64)/1000000
   }
+
+  pub fn merge_3way(&self, first: &FSEntry, second: &FSEntry) -> FSEntry {
+    assert!(first.filetype == second.filetype);
+    assert!(first.peernum != second.peernum);
+
+    let first_large = first.clock > second.clock || first.peernum > second.peernum;
+    let (left, right) = if first_large { (first, second) } else { (second, first) };
+
+    let peernum = cmp::max(left.peernum, right.peernum);
+
+    FSEntry {
+      clock: cmp::max(left.clock, right.clock),
+      vclock: left.vclock.merge(&right.vclock, peernum),
+      peernum: peernum,
+      filetype: left.filetype,
+      perm: merge_3way!(self.perm, left.perm, right.perm),
+      uid: merge_3way!(self.uid, left.uid, right.uid),
+      gid: merge_3way!(self.gid, left.gid, right.gid),
+      flags: merge_3way!(self.flags, left.flags, right.flags),
+      rdev: merge_3way!(self.rdev, left.rdev, right.rdev),
+      atime: cmp::max(left.atime, right.atime),
+      mtime: cmp::max(left.mtime, right.mtime),
+      ctime: cmp::max(left.ctime, right.ctime),
+      crtime: cmp::max(left.crtime, right.crtime),
+      chgtime: cmp::max(left.chgtime, right.chgtime),
+      bkuptime: cmp::max(left.bkuptime, right.bkuptime),
+      size: merge_3way!(self.size, left.size, right.size),
+      blocks: merge_3way!(self.blocks, left.blocks, right.blocks),
+      children: merge_3way!(self.children, left.children, right.children),
+      xattrs: merge_3way!(self.xattrs, left.xattrs, right.xattrs),
+    }
+  }
 }
 
 #[cfg(test)]
@@ -248,5 +290,34 @@ mod tests {
 
     assert_eq!(entry, entry2);
     assert_eq!(encoded, encoded2);
+  }
+
+  #[test]
+  fn three_way_merge() {
+    let base   = FSEntry::new(FileTypeDef::RegularFile, 0);
+    let mut first  = FSEntry::new(FileTypeDef::RegularFile, 0);
+    let mut second = FSEntry::new(FileTypeDef::RegularFile, 0);
+
+    first.peernum = 1;
+    first.perm = 10;
+    first.vclock.increment(1);
+    second.peernum = 2;
+    second.blocks = vec![[0;HASHSIZE]];
+    second.vclock.increment(2);
+
+    let merge1 = base.merge_3way(&first, &second);
+    let merge2 = base.merge_3way(&second, &first);
+
+    assert_eq!(merge1, merge2);
+    assert_eq!(first.perm, merge1.perm);
+    assert_eq!(second.blocks, merge1.blocks);
+    assert_eq!(2, merge1.peernum);
+
+    let mut newvclock = VectorClock::new();
+    newvclock.increment(1);
+    newvclock.increment(2);
+    newvclock.increment(2);
+
+    assert_eq!(newvclock, merge1.vclock);
   }
 }

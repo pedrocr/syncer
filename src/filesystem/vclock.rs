@@ -52,6 +52,27 @@ impl VectorClock {
 
     ordering
   }
+
+  pub fn merge(&self, other: &VectorClock, peernum: i64) -> Self {
+    let mut keys: Vec<&i64> = self.peers.keys().collect();
+    let mut otherkeys: Vec<&i64> = other.peers.keys().collect();
+    keys.append(&mut otherkeys);
+
+    let mut vals = BTreeMap::new();
+
+    for k in keys {
+      let v1 = self.peers.get(k).unwrap_or(&0);
+      let v2 = other.peers.get(k).unwrap_or(&0);
+      vals.insert(*k, v1+v2);
+    }
+
+    let v = vals.get(&peernum).unwrap_or(&0).clone();
+    vals.insert(peernum, v+1);
+
+    Self {
+      peers: vals,
+    }
+  }
 }
 
 #[cfg(test)]
@@ -98,5 +119,22 @@ mod tests {
 
     assert_eq!(vclock, vclock2);
     assert_eq!(encoded, encoded2);
+  }
+
+  #[test]
+  fn merge() {
+    let mut vclock1 = VectorClock::new();
+    vclock1.increment(1);
+    let mut vclock2 = VectorClock::new();
+    vclock2.increment(2);
+    vclock2.increment(2);
+    let mut vclock3 = VectorClock::new();
+    vclock3.increment(1);
+    vclock3.increment(1);
+    vclock3.increment(2);
+    vclock3.increment(2);
+
+    assert_eq!(vclock3, vclock1.merge(&vclock2, 1));
+    assert_eq!(vclock3, vclock2.merge(&vclock1, 1));
   }
 }
