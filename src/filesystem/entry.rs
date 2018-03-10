@@ -230,13 +230,6 @@ impl FSEntry {
     self.vclock.cmp(&other.vclock)
   }
 
-  pub fn cmp_time(&self, other: &Self) -> cmp::Ordering {
-    match self.clock.cmp(&other.clock) {
-      cmp::Ordering::Equal => self.peernum.cmp(&other.peernum),
-      o => o,
-    }
-  }
-
   pub fn timeval(&self) -> i64 {
     self.clock.sec * 1000 + (self.clock.nsec as i64)/1000000
   }

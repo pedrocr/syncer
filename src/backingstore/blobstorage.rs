@@ -22,7 +22,7 @@ use std::path::{Path, PathBuf};
 use std::fs;
 use std::io::prelude::*;
 use std::io::Error;
-use std::usize;
+use std::{usize, i64};
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex, RwLock};
 use std::fs::OpenOptions;
@@ -282,12 +282,14 @@ impl BlobStorage {
         try!(self.metadata.set_node(node, &hash, entry.timeval()));
       },
       VectorOrdering::Conflict => {
-        if entry.cmp_time(&currnode) == cmp::Ordering::Greater {
-          try!(self.metadata.set_node(node, &hash, entry.timeval()));
-        } else {
-          // Our current node is a later one so add the new one but behind it
-          try!(self.metadata.set_node_behind(node, &hash, entry.timeval()));
-        }
+        // We're in a conflict situation, we're going to need to merge and for that we
+        // need a common base to do the three way merge
+
+        let base = try!(self.read_earlier_node(node, entry));
+        let merged = base.merge_3way(entry, &currnode);
+        let encoded: Vec<u8> = bincode::serialize(&merged).unwrap();
+        let hash = try!(self.add_blob(&encoded));
+        try!(self.metadata.set_node(node, &hash, merged.timeval()));
       },
     }
     Ok(())
@@ -297,6 +299,20 @@ impl BlobStorage {
     let hash = try!(self.metadata.get_node(node));
     let blob = try!(self.get_blob(&hash, &[]));
     Ok((hash, blob.read(0, usize::MAX)))
+  }
+
+  pub fn read_earlier_node(&self, node: NodeId, comparison: &FSEntry) -> Result<FSEntry, c_int> {
+    let mut maxrowid = i64::MAX;
+    loop {
+      let (row, hash) = try!(self.metadata.get_earlier_node(node, maxrowid));
+      maxrowid = row;
+      let blob = try!(self.get_blob(&hash, &[]));
+      let encoded = blob.read(0, usize::MAX);
+      let entry: FSEntry = bincode::deserialize(&encoded[..]).unwrap();
+      if comparison.cmp_vclock(&entry) == VectorOrdering::Greater {
+        return Ok(entry)
+      }
+    }
   }
 
   pub fn node_exists(&self, node: NodeId) -> Result<bool, c_int> {

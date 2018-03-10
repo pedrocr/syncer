@@ -135,6 +135,14 @@ impl MetadataDB {
     Ok(Self::hash_from_string(hash))
   }
 
+  pub fn get_earlier_node(&self, node: NodeId, maxrowid: i64) -> Result<(i64, BlobHash), c_int> {
+    let conn = self.connection.lock().unwrap();
+    let (row, hash): (i64, String) = dberror_return!(conn.query_row(
+      "SELECT rowid, hash FROM nodes WHERE peernum=?1 AND id=?2 AND rowid < ?3 ORDER BY rowid DESC LIMIT 1",
+      &[&node.0, &node.1, &maxrowid], |row| (row.get(0), row.get(1))));
+    Ok((row, Self::hash_from_string(hash)))
+  }
+
   pub fn set_peer(&self, id: i64, offset: u64) -> Result<(), c_int> {
     let conn = self.connection.lock().unwrap();
     dberror_return!(conn.execute(
@@ -325,6 +333,7 @@ impl MetadataDB {
 mod tests {
   use super::*;
   use std;
+  use std::i64;
 
   #[test]
   fn set_and_get_node() {
@@ -362,6 +371,27 @@ mod tests {
     db.set_node((0,0), &from_hash, time).unwrap();
     db.set_node((0,0), &from_hash, time).unwrap();
     assert_eq!(1, db.to_upload_nodes().len());
+  }
+
+  #[test]
+  fn get_earlier_node() {
+    let conn = Connection::open_in_memory().unwrap();
+    let db = MetadataDB::new(conn);
+    let from_hash1 = [1;HASHSIZE];
+    let from_hash2 = [2;HASHSIZE];
+    let from_hash3 = [3;HASHSIZE];
+    let time = timeval();
+    db.set_node((0,0), &from_hash1, time).unwrap();
+    db.set_node((0,0), &from_hash2, time).unwrap();
+    db.set_node((0,0), &from_hash3, time).unwrap();
+
+    let (row, hash) = db.get_earlier_node((0,0), i64::MAX).unwrap();
+    assert_eq!(from_hash3, hash);
+    let (row, hash) = db.get_earlier_node((0,0), row).unwrap();
+    assert_eq!(from_hash2, hash);
+    let (row, hash) = db.get_earlier_node((0,0), row).unwrap();
+    assert_eq!(from_hash1, hash);
+    assert!(db.get_earlier_node((0,0), row).is_err());
   }
 
   #[test]
