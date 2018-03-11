@@ -236,7 +236,6 @@ impl FSEntry {
 
   pub fn merge_3way(&self, first: &FSEntry, second: &FSEntry) -> FSEntry {
     assert!(first.filetype == second.filetype);
-    assert!(first.peernum != second.peernum);
 
     let first_large = first.clock > second.clock || first.peernum > second.peernum;
     let (left, right) = if first_large { (first, second) } else { (second, first) };
@@ -297,6 +296,7 @@ mod tests {
     second.peernum = 2;
     second.blocks = vec![[0;HASHSIZE]];
     second.vclock.increment(2);
+    second.children.insert("test".to_string(), ((0,0), FileTypeDef::RegularFile));
 
     let merge1 = base.merge_3way(&first, &second);
     let merge2 = base.merge_3way(&second, &first);
@@ -305,6 +305,7 @@ mod tests {
     assert_eq!(first.perm, merge1.perm);
     assert_eq!(second.blocks, merge1.blocks);
     assert_eq!(2, merge1.peernum);
+    assert_eq!(second.children, merge1.children);
 
     let mut newvclock = VectorClock::new();
     newvclock.increment(1);
