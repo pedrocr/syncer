@@ -354,4 +354,24 @@ mod tests {
 
     assert_eq!(result.children, merge1.children);
   }
+
+  #[test]
+  fn children_remove() {
+    let mut base   = FSEntry::new(FileTypeDef::RegularFile, 0);
+    base.children.insert("foo".to_string(), ((1,1), FileTypeDef::RegularFile));
+    base.children.insert("bar".to_string(), ((2,2), FileTypeDef::RegularFile));
+
+    let mut first  = FSEntry::new(FileTypeDef::RegularFile, 0);
+    first.children.insert("foo".to_string(), ((1,1), FileTypeDef::RegularFile));
+    first.children.insert("bar".to_string(), ((2,2), FileTypeDef::RegularFile));
+
+    let mut second = FSEntry::new(FileTypeDef::RegularFile, 0);
+    second.children.insert("foo".to_string(), ((1,1), FileTypeDef::RegularFile));
+
+    let merge1 = base.merge_3way(&first, &second);
+    let merge2 = base.merge_3way(&second, &first);
+    assert_eq!(merge1, merge2);
+
+    assert_eq!(second.children, merge1.children);
+  }
 }
