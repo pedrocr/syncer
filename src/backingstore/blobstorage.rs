@@ -8,7 +8,7 @@ extern crate crossbeam;
 
 use super::metadatadb::*;
 use super::rsync::*;
-use super::NodeId;
+use super::{NodeInfo, NodeId};
 use settings::*;
 use rwhashes::*;
 use config::*;

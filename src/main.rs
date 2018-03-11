@@ -20,6 +20,7 @@ fn main() {
     "init"  => init(&args[2..], false),
     "clone"  => init(&args[2..], true),
     "mount" => mount(&args[2..]),
+    "printlog" => printlog(&args[2..]),
     _ => usage(),
   }
 
@@ -90,5 +91,26 @@ fn mount(args: &[String]) {
   match syncer::run(&source, &mount, &conf) {
     Ok(_) => {},
     Err(e) => eprintln!("MOUNT ERROR: {}", e),
+  }
+}
+
+fn printlog(args: &[String]) {
+  if args.len() != 1 { usage() }
+
+  let mut path = env::current_dir().unwrap();
+  path.push(&args[0]);
+  let mut source = path.clone();
+  source.push("data");
+  let mut config = path.clone();
+  config.push("config");
+
+  let conf = match config::Config::fetch_config(&config) {
+    Ok(c) => c,
+    Err(e) => {eprintln!("ERROR: Couldn't load config file: {}", e); process::exit(3);},
+  };
+
+  match syncer::printlog(&source, &conf) {
+    Ok(_) => {},
+    Err(e) => eprintln!("LOG ERROR: {}", e),
   }
 }

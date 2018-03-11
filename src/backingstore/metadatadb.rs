@@ -4,7 +4,7 @@ extern crate hex;
 extern crate time;
 
 use super::blobstorage::*;
-use super::NodeId;
+use super::{NodeInfo, NodeId};
 use settings::*;
 use self::rusqlite::Connection;
 use self::libc::c_int;
@@ -39,13 +39,6 @@ macro_rules! dberror_return {
       Err(e) => {dberror_print(e); return Err(libc::EIO)},
     }
   }
-}
-
-#[derive(Serialize, Deserialize)]
-pub struct NodeInfo {
-  pub id: NodeId,
-  pub hash: BlobHash,
-  pub creation: i64,
 }
 
 impl MetadataDB {

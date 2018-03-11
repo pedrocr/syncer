@@ -19,6 +19,13 @@ use std::io::{Error, ErrorKind};
 
 pub type NodeId = (i64, i64);
 
+#[derive(Debug, Serialize, Deserialize)]
+pub struct NodeInfo {
+  pub id: NodeId,
+  pub hash: BlobHash,
+  pub creation: i64,
+}
+
 pub struct BackingStore {
   peernum: i64,
   blobs: BlobStorage,

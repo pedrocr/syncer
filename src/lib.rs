@@ -2,13 +2,18 @@
 extern crate fuse_mt;
 use self::fuse_mt::*;
 extern crate crossbeam;
+extern crate base64;
+extern crate bincode;
+extern crate hex;
 
 use std::io::{Error, ErrorKind};
 use std::ffi::{OsStr};
 use std::time;
 use std::mem;
 use std::sync::mpsc;
-use std::path::Path;
+use std::path::{Path, PathBuf};
+use std::io::{Read, BufRead, BufReader};
+use std::fs::File;
 
 mod filesystem;
 mod backingstore;
@@ -141,5 +146,29 @@ pub fn init(source: &Path, conf: &Config) -> Result<(), Error> {
   };
 
   try!(bs.init_server());
+  Ok(())
+}
+
+pub fn printlog(source: &Path, conf: &Config) -> Result<(), Error> {
+  let mut log = PathBuf::from(source);
+  log.push("nodes");
+  log.push(&conf.peerid);
+
+  let buffer = BufReader::new(File::open(&log).unwrap());
+  for line in buffer.lines() {
+    let line = line.unwrap();
+    let buffer = base64::decode(&line).unwrap();
+    let node: backingstore::NodeInfo = bincode::deserialize(&buffer).unwrap();
+    let hash = hex::encode(&node.hash);
+    println!("node {} -> {}, {:?}", hash, node.creation, node.id);
+    let mut blobpath = PathBuf::from(source);
+    blobpath.push("blobs");
+    blobpath.push(hash);
+    let mut buffer = Vec::new();
+    File::open(&blobpath).unwrap().read_to_end(&mut buffer).unwrap();
+    let entry: filesystem::FSEntry = bincode::deserialize(&buffer).unwrap();
+    println!("entry {:?}", entry);
+  }
+
   Ok(())
 }

@@ -11,7 +11,7 @@ use std::io::{Read,Write};
 
 use settings::*;
 
-#[derive(Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct Config {
   #[serde(default)]
   pub formatversion: u64,
