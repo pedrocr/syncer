@@ -282,7 +282,7 @@ impl FSEntry {
       size: merge_3way!(self.size, left.size, right.size),
       blocks: merge_3way!(self.blocks, left.blocks, right.blocks),
       children: merge_3way_hash!(self.children, left.children, right.children),
-      xattrs: merge_3way!(self.xattrs, left.xattrs, right.xattrs),
+      xattrs: merge_3way_hash!(self.xattrs, left.xattrs, right.xattrs),
     }
   }
 }
@@ -373,5 +373,45 @@ mod tests {
     assert_eq!(merge1, merge2);
 
     assert_eq!(second.children, merge1.children);
+  }
+
+  #[test]
+  fn xattrs_merge() {
+    let base   = FSEntry::new(FileTypeDef::RegularFile, 0);
+    let mut first  = FSEntry::new(FileTypeDef::RegularFile, 0);
+    let mut second = FSEntry::new(FileTypeDef::RegularFile, 0);
+
+    first.xattrs.insert("foo".to_string(), vec![0]);
+    second.xattrs.insert("bar".to_string(), vec![0]);
+
+    let merge1 = base.merge_3way(&first, &second);
+    let merge2 = base.merge_3way(&second, &first);
+    assert_eq!(merge1, merge2);
+
+    let mut result = base.clone();
+    result.xattrs.insert("foo".to_string(), vec![0]);
+    result.xattrs.insert("bar".to_string(), vec![0]);
+
+    assert_eq!(result.xattrs, merge1.xattrs);
+  }
+
+  #[test]
+  fn xattrs_remove() {
+    let mut base   = FSEntry::new(FileTypeDef::RegularFile, 0);
+    base.xattrs.insert("foo".to_string(), vec![0]);
+    base.xattrs.insert("bar".to_string(), vec![0]);
+
+    let mut first  = FSEntry::new(FileTypeDef::RegularFile, 0);
+    first.xattrs.insert("foo".to_string(), vec![0]);
+    first.xattrs.insert("bar".to_string(), vec![0]);
+
+    let mut second = FSEntry::new(FileTypeDef::RegularFile, 0);
+    second.xattrs.insert("foo".to_string(), vec![0]);
+
+    let merge1 = base.merge_3way(&first, &second);
+    let merge2 = base.merge_3way(&second, &first);
+    assert_eq!(merge1, merge2);
+
+    assert_eq!(second.xattrs, merge1.xattrs);
   }
 }
