@@ -57,6 +57,29 @@ macro_rules! merge_3way {
   }
 }
 
+macro_rules! merge_3way_hash {
+  ($base:expr, $left:expr, $right:expr) => {
+    {
+      let mut keys: Vec<&String> = $left.keys().collect();
+      let mut otherkeys: Vec<&String> = $right.keys().collect();
+      keys.append(&mut otherkeys);
+
+      let mut newkeys = BTreeMap::new();
+      for k in keys {
+        let b = $base.get(k);
+        let l = $left.get(k);
+        let r = $right.get(k);
+        let m = merge_3way!(b, l, r);
+        if let Some(m) = m {
+          newkeys.insert(k.clone(), m.clone());
+        }
+      }
+      newkeys
+    }
+  }
+}
+
+
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct FSEntry {
   #[serde(with = "TimespecDef")]
@@ -258,7 +281,7 @@ impl FSEntry {
       bkuptime: cmp::max(left.bkuptime, right.bkuptime),
       size: merge_3way!(self.size, left.size, right.size),
       blocks: merge_3way!(self.blocks, left.blocks, right.blocks),
-      children: merge_3way!(self.children, left.children, right.children),
+      children: merge_3way_hash!(self.children, left.children, right.children),
       xattrs: merge_3way!(self.xattrs, left.xattrs, right.xattrs),
     }
   }
@@ -310,5 +333,25 @@ mod tests {
     newvclock.increment(2);
 
     assert_eq!(newvclock, merge1.vclock);
+  }
+
+  #[test]
+  fn children_merge() {
+    let base   = FSEntry::new(FileTypeDef::RegularFile, 0);
+    let mut first  = FSEntry::new(FileTypeDef::RegularFile, 0);
+    let mut second = FSEntry::new(FileTypeDef::RegularFile, 0);
+
+    first.children.insert("foo".to_string(), ((1,1), FileTypeDef::RegularFile));
+    second.children.insert("bar".to_string(), ((2,2), FileTypeDef::RegularFile));
+
+    let merge1 = base.merge_3way(&first, &second);
+    let merge2 = base.merge_3way(&second, &first);
+    assert_eq!(merge1, merge2);
+
+    let mut result = base.clone();
+    result.children.insert("foo".to_string(), ((1,1), FileTypeDef::RegularFile));
+    result.children.insert("bar".to_string(), ((2,2), FileTypeDef::RegularFile));
+
+    assert_eq!(result.children, merge1.children);
   }
 }
