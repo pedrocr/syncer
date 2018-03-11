@@ -240,12 +240,10 @@ impl FSEntry {
     let first_large = first.clock > second.clock || first.peernum > second.peernum;
     let (left, right) = if first_large { (first, second) } else { (second, first) };
 
-    let peernum = cmp::max(left.peernum, right.peernum);
-
     FSEntry {
       clock: cmp::max(left.clock, right.clock),
-      vclock: left.vclock.merge(&right.vclock, peernum),
-      peernum: peernum,
+      vclock: left.vclock.merge(&right.vclock),
+      peernum: cmp::max(left.peernum, right.peernum),
       filetype: left.filetype,
       perm: merge_3way!(self.perm, left.perm, right.perm),
       uid: merge_3way!(self.uid, left.uid, right.uid),
@@ -309,7 +307,6 @@ mod tests {
 
     let mut newvclock = VectorClock::new();
     newvclock.increment(1);
-    newvclock.increment(2);
     newvclock.increment(2);
 
     assert_eq!(newvclock, merge1.vclock);
