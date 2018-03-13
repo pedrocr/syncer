@@ -419,5 +419,14 @@ impl<'a> FilesystemMT for FS<'a> {
   fn fsyncdir(&self, req: RequestInfo, path: &Path, fh: u64, datasync: bool) -> ResultEmpty {
     self.fsync(req, path, fh, datasync)
   }
-}
 
+  #[cfg(target = "macos")]
+  fn getxtimes(&self, _req: RequestInfo, path: &Path) -> ResultXTimes {
+    try!(self.with_path(path, &|entry, _| {
+      Ok(XTimes {
+          bkuptime: entry.bkuptime,
+          crtime: entry.crtime,
+      })
+    }))
+  }
+}
