@@ -6,7 +6,6 @@ OSX stuff
 ---------
 
   - Implement `setvolname()`
-  - Implement `getxtimes()` by fetching the values we are already setting in `utimens_macos()`
 
 Proper versioning of the on-disk data
 -------------------------------------
