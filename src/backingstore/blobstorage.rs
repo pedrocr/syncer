@@ -4,7 +4,7 @@ extern crate hex;
 extern crate base64;
 extern crate libc;
 extern crate bincode;
-extern crate crossbeam;
+extern crate crossbeam_utils;
 
 use super::metadatadb::*;
 use super::rsync::*;
@@ -516,7 +516,7 @@ impl BlobStorage {
     for hash in hashes {
       if hash != &HASHZERO && !self.local_path(hash).exists() {
         let hash = hash.clone();
-        unsafe{crossbeam::spawn_unsafe(move || {
+        unsafe{crossbeam_utils::thread::spawn_unchecked(move || {
           let mut ongoing = self.ongoing.write(&hash);
           if !ongoing.contains_key(&hash) {
             let mutex = Arc::new(Mutex::new(false));

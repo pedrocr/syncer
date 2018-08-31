@@ -1,7 +1,9 @@
 #[macro_use] extern crate serde_derive;
 extern crate fuse_mt;
 use self::fuse_mt::*;
-extern crate crossbeam;
+extern crate crossbeam_utils;
+use self::crossbeam_utils::thread::Scope;
+use self::crossbeam_utils::thread::ScopedJoinHandle;
 extern crate base64;
 extern crate bincode;
 extern crate hex;
@@ -33,13 +35,13 @@ fn fix_lifetime<'a>(t: FS<'a>) -> FS<'static> {
   unsafe { mem::transmute(t) }
 }
 
-struct BackgroundThread {
-  handle: crossbeam::ScopedJoinHandle<()>,
+struct BackgroundThread<'a> {
+  handle: ScopedJoinHandle<'a, ()>,
   tx: std::sync::mpsc::Sender<u8>,
 }
 
-impl BackgroundThread {
-  fn new<'a, F: 'a>(scope: &crossbeam::Scope<'a>, secs: u64, closure: F) -> Self
+impl<'a> BackgroundThread<'a> {
+  fn new<F: 'a>(scope: &Scope<'a>, secs: u64, closure: F) -> Self
   where F: Fn() -> Result<(), Error> + Send {
     let (tx, rx) = mpsc::channel();
 
@@ -67,7 +69,7 @@ impl BackgroundThread {
 
   fn join(self) {
     self.tx.send(0).unwrap(); // Signal the thread to die
-    self.handle.join();
+    self.handle.join().unwrap();
   }
 }
 
@@ -89,7 +91,7 @@ pub fn run(source: &Path, mount: &Path, conf: &Config) -> Result<(), Error> {
   let fs = fix_lifetime(fs);
   let bsref = &bs;
 
-  crossbeam::scope(|scope| {
+  crossbeam_utils::thread::scope(|scope| {
     let sync   = BackgroundThread::new(&scope, 60, move || bsref.sync_all());
     let upload = BackgroundThread::new(&scope, 10, move || bsref.do_uploads());
     let nodes1 = BackgroundThread::new(&scope, 10, move || bsref.do_uploads_nodes());
@@ -109,7 +111,7 @@ pub fn run(source: &Path, mount: &Path, conf: &Config) -> Result<(), Error> {
     nodes2.join();
     remove.join();
     ret
-  })
+  }).unwrap()
 }
 
 pub fn clone(source: &Path, conf: &Config) -> Result<(), Error> {

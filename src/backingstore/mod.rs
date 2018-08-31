@@ -1,6 +1,6 @@
 extern crate bincode;
 extern crate libc;
-extern crate crossbeam;
+extern crate crossbeam_utils;
 
 mod blobstorage;
 mod metadatadb;
