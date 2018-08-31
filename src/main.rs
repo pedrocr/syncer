@@ -16,6 +16,8 @@ fn usage() {
 
 fn main() {
   let args: Vec<String> = env::args().collect();
+  if args.len() < 2 { usage() }
+
   match args[1].as_ref() {
     "init"  => init(&args[2..], false),
     "clone"  => init(&args[2..], true),
