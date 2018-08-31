@@ -2,7 +2,7 @@ extern crate toml;
 extern crate rand;
 extern crate hex;
 
-use self::rand::Rng;
+use self::rand::RngCore;
 use self::rand::os::OsRng;
 
 use std::path::Path;

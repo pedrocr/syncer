@@ -21,7 +21,7 @@ rusqlite = "0.14"
 crossbeam = "0.3"
 toml = "0.4"
 base64 = "0.9"
-rand = "0.4"
+rand = "0.5"
 
 [profile.dev]
 opt-level = 3
