@@ -42,3 +42,8 @@ POSIX stuff
 -----------
 
   - Implement statfs by just proxying the statfs of the underlying filesystem and some extra metadata from the extended (with remote data) filesystem
+
+Performance Stuff
+-----------------
+
+  - Replace Vec<RwLock<HashMap>> in RwHashes with something like Mutex<HashMap<K, Mutex<V>> for finer grained locking and no pathological cases.
