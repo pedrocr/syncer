@@ -353,7 +353,7 @@ impl<'a> FilesystemMT for FS<'a> {
           Ok(Xattr::Data(value.clone()))
         }
       } else {
-        Err(libc::ENOATTR)
+        Err(libc::ENODATA)
       }
     })?
   }
@@ -385,7 +385,7 @@ impl<'a> FilesystemMT for FS<'a> {
       match (has_flag(libc::XATTR_CREATE), has_flag(libc::XATTR_REPLACE)) {
         (false, false) => {},
         (false, true) => if !entry.xattrs.contains_key(&attrname) {
-          return Err(libc::ENOATTR);
+          return Err(libc::ENODATA);
         },
         (true, false) => if entry.xattrs.contains_key(&attrname) {
           return Err(libc::EEXIST);
@@ -403,7 +403,7 @@ impl<'a> FilesystemMT for FS<'a> {
       let attrname = from_os_str(name)?;
       match entry.xattrs.remove(&attrname) {
         Some(_) => Ok(()),
-        None => Err(libc::ENOATTR),
+        None => Err(libc::ENODATA),
       }
     })?
   }
