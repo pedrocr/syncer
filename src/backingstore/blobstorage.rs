@@ -181,7 +181,7 @@ impl BlobStorage {
     {
       let mut blob_cache = self.blob_cache.write(&node);
       if let Some(blocks) = blob_cache.get_mut(&node) {
-        if let Some(mut blob) = blocks.get_mut(&block) {
+        if let Some(blob) = blocks.get_mut(&block) {
           return Ok(blob.write(offset, data))
         }
       }
