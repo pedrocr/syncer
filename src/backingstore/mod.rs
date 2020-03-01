@@ -36,9 +36,9 @@ pub struct BackingStore {
 
 impl BackingStore {
   pub fn new(path: &Path, config: &Config) -> Result<Self, c_int> {
-    let bs = try!(BlobStorage::new(&config.peerid, path, &config.server, config.maxbytes));
+    let bs = BlobStorage::new(&config.peerid, path, &config.server, config.maxbytes)?;
     let zero = BlobStorage::zero(1);
-    let nodecount = try!(bs.max_node(config.peernum())) + 1;
+    let nodecount = bs.max_node(config.peernum())? + 1;
 
     let out = Self {
       blobs: bs,
@@ -47,7 +47,7 @@ impl BackingStore {
       node_cache: RwHashes::new(8),
       zero: zero,
     };
-    try!(out.add_blob(&[0]));
+    out.add_blob(&[0])?;
     Ok(out)
   }
 
@@ -65,7 +65,7 @@ impl BackingStore {
       *counter += 1;
       (self.peernum, *counter)
     };
-    try!(self.save_node(node, entry));
+    self.save_node(node, entry)?;
     Ok(node)
   }
 
@@ -85,14 +85,14 @@ impl BackingStore {
       Some(n) => Ok((*n).clone()),
       None => {
         // We're in the slow path where we actually need to fetch stuff from disk
-        let (_, entry) = try!(self.fetch_node(node));
+        let (_, entry) = self.fetch_node(node)?;
         Ok(entry)
       },
     }
   }
 
   pub fn fetch_node(&self, node: NodeId) -> Result<(BlobHash, FSEntry), c_int> {
-    let (hash, buffer) = try!(self.blobs.read_node(node));
+    let (hash, buffer) = self.blobs.read_node(node)?;
     Ok((hash, bincode::deserialize(&buffer[..]).unwrap()))
   }
 
@@ -100,7 +100,7 @@ impl BackingStore {
     let nodes = self.node_cache.read(&node);
     Ok(match nodes.get(&node) {
       Some(_) => true,
-      None => try!(self.blobs.node_exists(node)),
+      None => self.blobs.node_exists(node)?,
     })
   }
 
@@ -113,17 +113,17 @@ impl BackingStore {
   }
 
   fn sync_one_node(&self, node: NodeId, mut entry: FSEntry) -> Result<(), c_int> {
-    for (i, hash) in try!(self.blobs.sync_node(node)) {
+    for (i, hash) in self.blobs.sync_node(node)? {
       entry.set_block(i, hash);
     }
-    try!(self.save_node(node, entry));
+    self.save_node(node, entry)?;
     Ok(())
   }
 
   pub fn sync_node(&self, node: NodeId) -> Result<(), c_int> {
     let mut nodes = self.node_cache.write(&node);
     if let Some(entry) = nodes.remove(&node) {
-      try!(self.sync_one_node(node, entry));
+      self.sync_one_node(node, entry)?;
     }
     self.blobs.do_save();
     Ok(())
@@ -144,10 +144,10 @@ impl BackingStore {
   }
 
   pub fn fsync_node(&self, node: NodeId) -> Result<(), c_int> {
-    let (hash, entry) = try!(self.fetch_node(node));
-    try!(self.blobs.fsync_file(&hash));
+    let (hash, entry) = self.fetch_node(node)?;
+    self.blobs.fsync_file(&hash)?;
     for hash in entry.get_blocks() {
-      try!(self.blobs.fsync_file(&hash));
+      self.blobs.fsync_file(&hash)?;
     }
     Ok(())
   }
@@ -172,10 +172,10 @@ impl BackingStore {
   }
 
   pub fn init_server(&self) -> Result<(), Error> {
-    try!(self.blobs.init_server());
-    try!(self.sync_all());
-    try!(self.do_uploads());
-    try!(self.do_uploads_nodes());
+    self.blobs.init_server()?;
+    self.sync_all()?;
+    self.do_uploads()?;
+    self.do_uploads_nodes()?;
     Ok(())
   }
 }

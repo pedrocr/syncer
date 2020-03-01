@@ -126,7 +126,7 @@ pub fn clone(source: &Path, conf: &Config) -> Result<(), Error> {
     Err(_) => return Err(Error::new(ErrorKind::Other, "Couldn't create the backing store")),
   };
 
-  try!(bs.do_downloads_nodes());
+  bs.do_downloads_nodes()?;
 
   Ok(())
 }
@@ -147,7 +147,7 @@ pub fn init(source: &Path, conf: &Config) -> Result<(), Error> {
     Err(_) => return Err(Error::new(ErrorKind::Other, "Couldn't create the filesystem")),
   };
 
-  try!(bs.init_server());
+  bs.init_server()?;
   Ok(())
 }
 

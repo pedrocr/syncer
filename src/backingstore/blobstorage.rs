@@ -172,7 +172,7 @@ impl BlobStorage {
       }
     }
 
-    let blob = try!(self.get_blob(hash, readahead));
+    let blob = self.get_blob(hash, readahead)?;
     Ok(blob.read(offset, bytes))
   }
 
@@ -187,7 +187,7 @@ impl BlobStorage {
       }
     }
 
-    let mut blob = try!(self.get_blob(hash, readahead));
+    let mut blob = self.get_blob(hash, readahead)?;
     let hash = blob.write(offset, data);
 
     // Store the blob in the cache
@@ -203,7 +203,7 @@ impl BlobStorage {
     let mut blob_cache = self.blob_cache.write(&node);
     if let Some(mut blocks) = blob_cache.remove(&node) {
       for (i, blob) in blocks.drain() {
-        let hash = try!(self.store_blob(blob));
+        let hash = self.store_blob(blob)?;
         stored.push((i, hash));
       }
     }
@@ -214,9 +214,9 @@ impl BlobStorage {
     self.readahead_from_server(readahead);
     let file = self.local_path(hash);
     if !file.exists() {
-      try!(self.fetch_from_server(hash));
+      self.fetch_from_server(hash)?;
     }
-    let blob = try!(Blob::load(&file));
+    let blob = Blob::load(&file)?;
     {
       let timeval = timeval();
       let mut touched = self.touched_blobs.write().unwrap();
@@ -228,7 +228,7 @@ impl BlobStorage {
   fn store_blob(&self, blob: Blob) -> Result<BlobHash, c_int> {
     let hash = blob.hash();
     let file = self.local_path(&hash);
-    try!(blob.store(&file));
+    blob.store(&file)?;
     {
       let mut written_blobs = self.written_blobs.write().unwrap();
       written_blobs.push((hash, blob.data.len() as u64, timeval()));
@@ -243,7 +243,7 @@ impl BlobStorage {
   pub fn add_blob(&self, data: &[u8]) -> Result<BlobHash, c_int> {
     let blob = Blob::new_with_data(data.to_vec());
     let hash = blob.hash();
-    try!(self.store_blob(blob));
+    self.store_blob(blob)?;
     Ok(hash)
   }
 
@@ -253,25 +253,25 @@ impl BlobStorage {
 
   pub fn save_node(&self, node: NodeId, entry: &FSEntry) -> Result<(), c_int> {
     let encoded: Vec<u8> = bincode::serialize(&entry).unwrap();
-    let hash = try!(self.add_blob(&encoded));
-    if try!(self.metadata.node_exists_long(node, &hash, entry.timeval())) {
+    let hash = self.add_blob(&encoded)?;
+    if self.metadata.node_exists_long(node, &hash, entry.timeval())? {
       // this is a duplicate, skip it
       return Ok(())
     }
-    if !try!(self.metadata.node_exists(node)) {
+    if !self.metadata.node_exists(node)? {
       // this is the first of its kind push it
-      try!(self.metadata.set_node(node, &hash, entry.timeval()));
+      self.metadata.set_node(node, &hash, entry.timeval())?;
       return Ok(())
     }
-    let (hash2, buffer) = try!(self.read_node(node));
+    let (hash2, buffer) = self.read_node(node)?;
     let currnode: FSEntry = bincode::deserialize(&buffer[..]).unwrap();
     match entry.cmp_vclock(&currnode) {
       VectorOrdering::Greater => {
-        try!(self.metadata.set_node(node, &hash, entry.timeval()));
+        self.metadata.set_node(node, &hash, entry.timeval())?;
       },
       VectorOrdering::Less => {
         // Our current node is a later one so add the new one but behind it
-        try!(self.metadata.set_node_behind(node, &hash, entry.timeval()));
+        self.metadata.set_node_behind(node, &hash, entry.timeval())?;
       },
       VectorOrdering::Equal => {
         eprintln!("WARNING: found node {:?} with same vector clock that isn't identical", node);
@@ -279,34 +279,34 @@ impl BlobStorage {
         eprintln!("2nd hash is {}", hex::encode(&hash2));
         eprintln!("1st from peer {} is {:?}", entry.peernum, entry);
         eprintln!("2nd from peer {} is {:?}", currnode.peernum, currnode);
-        try!(self.metadata.set_node(node, &hash, entry.timeval()));
+        self.metadata.set_node(node, &hash, entry.timeval())?;
       },
       VectorOrdering::Conflict => {
         // We're in a conflict situation, we're going to need to merge and for that we
         // need a common base to do the three way merge
 
-        let base = try!(self.read_earlier_node(node, entry));
+        let base = self.read_earlier_node(node, entry)?;
         let merged = base.merge_3way(entry, &currnode);
         let encoded: Vec<u8> = bincode::serialize(&merged).unwrap();
-        let hash = try!(self.add_blob(&encoded));
-        try!(self.metadata.set_node(node, &hash, merged.timeval()));
+        let hash = self.add_blob(&encoded)?;
+        self.metadata.set_node(node, &hash, merged.timeval())?;
       },
     }
     Ok(())
   }
 
   pub fn read_node(&self, node: NodeId) -> Result<(BlobHash, Vec<u8>), c_int> {
-    let hash = try!(self.metadata.get_node(node));
-    let blob = try!(self.get_blob(&hash, &[]));
+    let hash = self.metadata.get_node(node)?;
+    let blob = self.get_blob(&hash, &[])?;
     Ok((hash, blob.read(0, usize::MAX)))
   }
 
   pub fn read_earlier_node(&self, node: NodeId, comparison: &FSEntry) -> Result<FSEntry, c_int> {
     let mut maxrowid = i64::MAX;
     loop {
-      let (row, hash) = try!(self.metadata.get_earlier_node(node, maxrowid));
+      let (row, hash) = self.metadata.get_earlier_node(node, maxrowid)?;
       maxrowid = row;
-      let blob = try!(self.get_blob(&hash, &[]));
+      let blob = self.get_blob(&hash, &[])?;
       let encoded = blob.read(0, usize::MAX);
       let entry: FSEntry = bincode::deserialize(&encoded[..]).unwrap();
       if comparison.cmp_vclock(&entry) == VectorOrdering::Greater {
@@ -328,7 +328,7 @@ impl BlobStorage {
     loop {
       let mut hashes = self.metadata.to_upload();
       if hashes.len() == 0 { break }
-      try!(self.upload_to_server(&hashes));
+      self.upload_to_server(&hashes)?;
       self.metadata.mark_synced_blobs(hashes.drain(..));
     }
     Ok(())
@@ -397,7 +397,7 @@ impl BlobStorage {
     cmd.arg(format!("--exclude={}", self.peerid));
     cmd.arg(&remote);
     cmd.arg(&path);
-    try!(cmd.run());
+    cmd.run()?;
 
     for file in fs::read_dir(&path).unwrap() {
       let path = file.unwrap().path();

@@ -177,12 +177,12 @@ impl FSEntry {
   }
 
   pub fn add_child(&mut self, name: &OsStr, node: (NodeId, FileTypeDef)) -> Result<(), c_int> {
-    self.children.insert(try!(from_os_str(name)), node);
+    self.children.insert(from_os_str(name)?, node);
     Ok(())
   }
 
   pub fn remove_child(&mut self, name: &OsStr) -> Result<(NodeId, FileTypeDef), c_int> {
-    match self.children.remove(&try!(from_os_str(name))) {
+    match self.children.remove(&from_os_str(name)?) {
       None => Err(libc::ENOENT),
       Some(c) => Ok(c),
     }
@@ -207,7 +207,7 @@ impl FSEntry {
       let bend = cmp::min(end, (i+1)*BLKSIZE);
       let bsize = bend - bstart;
       let boffset = bstart - i*BLKSIZE;
-      try!(bs.write(node, i, block, boffset, &data[written..written+bsize], readahead));
+      bs.write(node, i, block, boffset, &data[written..written+bsize], readahead)?;
       written += bsize;
     }
     assert!(written == data.len());
@@ -234,7 +234,7 @@ impl FSEntry {
       let bend = cmp::min(end, (i+1)*BLKSIZE);
       let bsize = bend - bstart;
       let boffset = bstart - i*BLKSIZE;
-      data[written..written+bsize].copy_from_slice(&try!(bs.read(node, i, block, boffset, bsize, readahead)));
+      data[written..written+bsize].copy_from_slice(&bs.read(node, i, block, boffset, bsize, readahead)?);
       written += bsize;
     }
     assert!(written == data.len());

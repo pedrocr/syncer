@@ -42,12 +42,12 @@ impl<'a> FS<'a> {
     };
 
     // Add a root node as 0 if it doesn't exist
-    if !try!(fs.backing.node_exists((0,0))) {
+    if !fs.backing.node_exists((0,0))? {
       let mut root = FSEntry::new(FileTypeDef::Directory, peernum);
       root.perm = 0o755;
       root.uid = users::get_current_uid();
       root.gid = users::get_current_gid();
-      try!(fs.backing.save_node((0,0), root));
+      fs.backing.save_node((0,0), root)?;
     }
     Ok(fs)
   }
@@ -62,7 +62,7 @@ impl<'a> FS<'a> {
 
   fn with_path<F,T>(&self, path: &Path, closure: &F) -> Result<T, c_int>
     where F : Fn(&FSEntry, NodeId) -> T {
-    self.with_node(try!(self.find_node(path)), closure)
+    self.with_node(self.find_node(path)?, closure)
   }
 
   fn with_handle<F,T>(&self, handle: u64, closure: &F) -> Result<T, c_int>
@@ -79,7 +79,7 @@ impl<'a> FS<'a> {
 
   fn with_node<F,T>(&self, node: NodeId, closure: &F) -> Result<T, c_int>
     where F : Fn(&FSEntry, NodeId) -> T {
-    let entry = try!(self.backing.get_node(node));
+    let entry = self.backing.get_node(node)?;
     Ok(closure(&entry, node))
   }
 
@@ -93,7 +93,7 @@ impl<'a> FS<'a> {
 
   fn modify_path<F,T>(&self, path: &Path, closure: &F) -> Result<T, c_int>
     where F : Fn(&mut FSEntry, NodeId) -> T {
-    self.modify_node(try!(self.find_node(path)), false, closure)
+    self.modify_node(self.find_node(path)?, false, closure)
   }
 
   fn modify_handle<F,T>(&self, handle: u64, cache: bool, closure: &F) -> Result<T, c_int>
@@ -110,15 +110,15 @@ impl<'a> FS<'a> {
 
   fn modify_node<F,T>(&self, node: NodeId, cache: bool, closure: &F) -> Result<T, c_int>
     where F : Fn(&mut FSEntry, NodeId) -> T {
-    let mut entry = try!(self.backing.get_node(node));
+    let mut entry = self.backing.get_node(node)?;
     let res = closure(&mut entry, node);
     entry.clock = self::time::get_time();
     entry.vclock.increment(self.peernum);
     entry.peernum = self.peernum;
     if cache {
-      try!(self.backing.save_node_cached(node, entry));
+      self.backing.save_node_cached(node, entry)?;
     } else {
-      try!(self.backing.save_node(node, entry));
+      self.backing.save_node(node, entry)?;
     }
     Ok(res)
   }
@@ -128,8 +128,8 @@ impl<'a> FS<'a> {
     let mut iterator = path.iter();
     iterator.next(); // Skip the root as that's already nodenum 0
     for elem in iterator {
-      let node = try!(self.backing.get_node(nodenum));
-      match node.children.get(&try!(from_os_str(elem))) {
+      let node = self.backing.get_node(nodenum)?;
+      match node.children.get(&from_os_str(elem)?) {
         None => return Err(libc::ENOENT),
         Some(&(num,_)) => nodenum = num,
       }
@@ -151,7 +151,7 @@ impl<'a> FS<'a> {
   fn delete_handle(&self, handle: u64) -> Result<(), c_int> {
     let mut handles = self.handles.write(&handle);
     if let Some(handle) = handles.remove(&handle) {
-      try!(self.backing.sync_node(handle.node));
+      self.backing.sync_node(handle.node)?;
     }
     Ok(())
   }
@@ -170,7 +170,7 @@ impl<'a> FilesystemMT for FS<'a> {
   }
 
   fn open(&self, _req: RequestInfo, path: &Path, flags: u32) -> ResultOpen {
-    let node = try!(self.find_node(path));
+    let node = self.find_node(path)?;
     let handle = self.create_handle(Handle{node: node, _flags: flags,});
     Ok((handle, flags))
   }
@@ -184,13 +184,13 @@ impl<'a> FilesystemMT for FS<'a> {
   }
 
   fn getattr(&self, _req: RequestInfo, path: &Path, fh: Option<u64>) -> ResultEntry {
-    let attrs = try!(self.with_path_optional_handle(path, fh, &(|entry, _| entry.attrs())));
+    let attrs = self.with_path_optional_handle(path, fh, &(|entry, _| entry.attrs()))?;
     let time = time::get_time();
     Ok((time, attrs))
   }
 
   fn readdir(&self, _req: RequestInfo, _path: &Path, fh: u64) -> ResultReaddir {
-    let children = try!(self.with_handle(fh, &(|node, _| node.children())));
+    let children = self.with_handle(fh, &(|node, _| node.children()))?;
     Ok(children)
   }
 
@@ -223,46 +223,46 @@ impl<'a> FilesystemMT for FS<'a> {
   }
 
   fn create(&self, _req: RequestInfo, parent: &Path, name: &OsStr, mode: u32, flags: u32) -> ResultCreate {
-    let node = try!(self.find_node(parent));
-    let entry = try!(self.with_node(node, &(|parent, _| {
+    let node = self.find_node(parent)?;
+    let entry = self.with_node(node, &(|parent, _| {
       let mut e = FSEntry::new(FileTypeDef::RegularFile, self.peernum);
       e.perm = mode;
       e.gid = parent.gid;
       e.uid = parent.uid;
       e
-    })));
+    }))?;
     let mut created_entry = CreatedEntry {
       ttl: entry.ctime,
       attr: entry.attrs(),
       fh: 0,
       flags: entry.flags,
     };
-    let newnode = try!(self.backing.create_node(entry));
+    let newnode = self.backing.create_node(entry)?;
     created_entry.fh = self.create_handle(Handle{node: newnode, _flags: flags,});
-    try!(try!(self.modify_node(node, false, &(|parent, _| parent.add_child(name, (newnode, FileTypeDef::RegularFile))))));
+    self.modify_node(node, false, &(|parent, _| parent.add_child(name, (newnode, FileTypeDef::RegularFile))))??;
     Ok(created_entry)
   }
 
   fn mkdir(&self, _req: RequestInfo, parent: &Path, name: &OsStr, mode: u32) -> ResultEntry {
-    let node = try!(self.find_node(parent));
-    let entry = try!(self.with_node(node, &(|parent, _| {
+    let node = self.find_node(parent)?;
+    let entry = self.with_node(node, &(|parent, _| {
       let mut e = FSEntry::new(FileTypeDef::Directory, self.peernum);
       e.perm = mode;
       e.gid = parent.gid;
       e.uid = parent.uid;
       e
-    })));
+    }))?;
     let created_dir = (entry.ctime, entry.attrs());
-    let newnode = try!(self.backing.create_node(entry));
-    try!(try!(self.modify_node(node, false, &(|parent, _| parent.add_child(name, (newnode, FileTypeDef::Directory))))));
+    let newnode = self.backing.create_node(entry)?;
+    self.modify_node(node, false, &(|parent, _| parent.add_child(name, (newnode, FileTypeDef::Directory))))??;
     Ok(created_dir)
   }
 
   fn symlink(&self, _req: RequestInfo, parent: &Path, name: &OsStr, target: &Path) -> ResultEntry {
-    let node = try!(self.find_node(parent));
+    let node = self.find_node(parent)?;
     let data = target.as_os_str().as_bytes();
-    let blob = try!(self.backing.add_blob(&data));
-    let entry = try!(self.with_node(node, &(|parent, _| {
+    let blob = self.backing.add_blob(&data)?;
+    let entry = self.with_node(node, &(|parent, _| {
       let mut e = FSEntry::new(FileTypeDef::Symlink, self.peernum);
       e.blocks = vec![blob];
       e.perm = 0o777;
@@ -270,20 +270,20 @@ impl<'a> FilesystemMT for FS<'a> {
       e.gid = parent.gid;
       e.uid = parent.uid;
       e
-    })));
+    }))?;
     let created_symlink = (entry.ctime, entry.attrs());
-    let newnode = try!(self.backing.create_node(entry));
-    try!(try!(self.modify_node(node, false, &(|parent, _| parent.add_child(name, (newnode, FileTypeDef::Symlink))))));
+    let newnode = self.backing.create_node(entry)?;
+    self.modify_node(node, false, &(|parent, _| parent.add_child(name, (newnode, FileTypeDef::Symlink))))??;
     Ok(created_symlink)
   }
 
   fn link(&self, _req: RequestInfo, path: &Path, newparent: &Path, newname: &OsStr) -> ResultEntry {
-    let childnode = try!(self.find_node(path));
-    let dirnode = try!(self.find_node(newparent));
-    let childnodeinfo = try!(self.with_node(childnode, &(|entry, _| {
+    let childnode = self.find_node(path)?;
+    let dirnode = self.find_node(newparent)?;
+    let childnodeinfo = self.with_node(childnode, &(|entry, _| {
       ((entry.ctime, entry.attrs()), entry.filetype)
-    })));
-    try!(try!(self.modify_node(dirnode, false, &(|parent, _| parent.add_child(newname, (childnode, childnodeinfo.1))))));
+    }))?;
+    self.modify_node(dirnode, false, &(|parent, _| parent.add_child(newname, (childnode, childnodeinfo.1))))??;
     Ok(childnodeinfo.0)
   }
 
@@ -294,39 +294,39 @@ impl<'a> FilesystemMT for FS<'a> {
   }
 
   fn write(&self, _req: RequestInfo, _path: &Path, fh: u64, offset: u64, data: Vec<u8>, _flags: u32) -> ResultWrite {
-    try!(self.modify_handle(fh, true, &(|entry, node| entry.write(node, &self.backing, offset, &data))))
+    self.modify_handle(fh, true, &(|entry, node| entry.write(node, &self.backing, offset, &data)))?
   }
 
   fn read(&self, _req: RequestInfo, _path: &Path, fh: u64, offset: u64, size: u32) -> ResultData {
-    try!(self.with_handle(fh, &(|entry, node| entry.read(node, &self.backing, offset, size))))
+    self.with_handle(fh, &(|entry, node| entry.read(node, &self.backing, offset, size)))?
   }
 
   fn readlink(&self, _req: RequestInfo, path: &Path) -> ResultData {
-    try!(self.with_path(path, &(|entry, node| entry.read(node, &self.backing, 0, BLKSIZE as u32))))
+    self.with_path(path, &(|entry, node| entry.read(node, &self.backing, 0, BLKSIZE as u32)))?
   }
 
   fn rmdir(&self, _req: RequestInfo, parent: &Path, name: &OsStr) -> ResultEmpty {
     let mut path = parent.to_path_buf();
     path.push(name);
 
-    try!(try!(self.with_path(&path, &(|dir, _| {
+    self.with_path(&path, &(|dir, _| {
       if dir.children.len() == 0 {Ok(())} else {Err(libc::ENOTEMPTY)}
-    }))));
+    }))??;
 
-    try!(try!(self.modify_path(parent, &(|parent, _| {
+    self.modify_path(parent, &(|parent, _| {
       parent.remove_child(name)
-    }))));
+    }))??;
     Ok(())
   }
 
   fn unlink(&self, _req: RequestInfo, parent: &Path, name: &OsStr) -> ResultEmpty {
-    try!(try!(self.modify_path(parent, &(|parent, _| parent.remove_child(name)))));
+    self.modify_path(parent, &(|parent, _| parent.remove_child(name)))??;
     Ok(())
   }
 
   fn rename(&self, _req: RequestInfo, parent: &Path, name: &OsStr, newparent: &Path, newname: &OsStr) -> ResultEmpty {
-    let node = try!(try!(self.modify_path(parent, &(|parent, _| parent.remove_child(name)))));
-    try!(try!(self.modify_path(newparent, &(|newparent, _| newparent.add_child(newname, node)))));
+    let node = self.modify_path(parent, &(|parent, _| parent.remove_child(name)))??;
+    self.modify_path(newparent, &(|newparent, _| newparent.add_child(newname, node)))??;
     Ok(())
   }
 
@@ -344,8 +344,8 @@ impl<'a> FilesystemMT for FS<'a> {
   }
 
   fn getxattr(&self, _req: RequestInfo, path: &Path, name: &OsStr, size: u32) -> ResultXattr {
-    try!(self.with_path(path, &|entry, _| {
-      let attrname = try!(from_os_str(name));
+    self.with_path(path, &|entry, _| {
+      let attrname = from_os_str(name)?;
       if let Some(value) = entry.xattrs.get(&attrname) {
         if size == 0 {
           Ok(Xattr::Size(value.len() as u32))
@@ -355,11 +355,11 @@ impl<'a> FilesystemMT for FS<'a> {
       } else {
         Err(libc::ENOATTR)
       }
-    }))
+    })?
   }
 
   fn listxattr(&self, _req: RequestInfo, path: &Path, size: u32) -> ResultXattr {
-    try!(self.with_path(path, &|entry, _| {
+    self.with_path(path, &|entry, _| {
       let mut output = Vec::<u8>::new();
       for name in entry.xattrs.keys() {
         // NOTE: .as_bytes() is UNIX only
@@ -374,12 +374,12 @@ impl<'a> FilesystemMT for FS<'a> {
       } else {
         Ok(Xattr::Data(output))
       }
-    }))
+    })?
   }
 
   fn setxattr(&self, _req: RequestInfo, path: &Path, name: &OsStr, value: &[u8], flags: u32, _position: u32) -> ResultEmpty {
-    try!(self.modify_path(path, &|entry, _| {
-      let attrname = try!(from_os_str(name));
+    self.modify_path(path, &|entry, _| {
+      let attrname = from_os_str(name)?;
 
       let has_flag = |flag| (flags as i32 & flag) != 0;
       match (has_flag(libc::XATTR_CREATE), has_flag(libc::XATTR_REPLACE)) {
@@ -395,25 +395,25 @@ impl<'a> FilesystemMT for FS<'a> {
 
       entry.xattrs.insert(attrname, value.to_vec());
       Ok(())
-    }))
+    })?
   }
 
   fn removexattr(&self, _req: RequestInfo, path: &Path, name: &OsStr) -> ResultEmpty {
-    try!(self.modify_path(path, &|entry, _| {
-      let attrname = try!(from_os_str(name));
+    self.modify_path(path, &|entry, _| {
+      let attrname = from_os_str(name)?;
       match entry.xattrs.remove(&attrname) {
         Some(_) => Ok(()),
         None => Err(libc::ENOATTR),
       }
-    }))
+    })?
   }
 
   fn fsync(&self, _req: RequestInfo, _path: &Path, fh: u64, _datasync: bool) -> ResultEmpty {
-    try!(self.with_handle(fh, &(|_, node| {
-      try!(self.backing.sync_node(node));
-      try!(self.backing.fsync_node(node));
+    self.with_handle(fh, &(|_, node| {
+      self.backing.sync_node(node)?;
+      self.backing.fsync_node(node)?;
       Ok(())
-    })))
+    }))?
   }
 
   fn fsyncdir(&self, req: RequestInfo, path: &Path, fh: u64, datasync: bool) -> ResultEmpty {
@@ -422,11 +422,11 @@ impl<'a> FilesystemMT for FS<'a> {
 
   #[cfg(target = "macos")]
   fn getxtimes(&self, _req: RequestInfo, path: &Path) -> ResultXTimes {
-    try!(self.with_path(path, &|entry, _| {
+    self.with_path(path, &|entry, _| {
       Ok(XTimes {
           bkuptime: entry.bkuptime,
           crtime: entry.crtime,
       })
-    }))
+    })?
   }
 }
