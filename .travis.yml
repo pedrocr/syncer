@@ -10,7 +10,7 @@ addons:
     packages:
       - libfuse-dev
 install:
-  - if [ "$TRAVIS_OS_NAME" == "osx" ]; then brew update && brew tap caskroom/cask && brew cask install osxfuse; fi
+  - if [ "$TRAVIS_OS_NAME" == "osx" ]; then brew update && brew cask install osxfuse; fi
 notifications:
   email:
     recipients:
