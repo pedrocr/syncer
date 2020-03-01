@@ -9,7 +9,7 @@ use std::path::Path;
 use std::fs::File;
 use std::io::{Read,Write};
 
-use settings::*;
+use crate::settings::*;
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Config {

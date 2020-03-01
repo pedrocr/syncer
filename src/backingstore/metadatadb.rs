@@ -5,7 +5,7 @@ extern crate time;
 
 use super::blobstorage::*;
 use super::{NodeInfo, NodeId};
-use settings::*;
+use crate::settings::*;
 use self::rusqlite::Connection;
 use self::libc::c_int;
 use std::sync::Mutex;

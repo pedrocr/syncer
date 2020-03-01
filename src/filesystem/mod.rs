@@ -11,9 +11,9 @@ use std::ffi::{OsStr, OsString};
 use std::os::unix::ffi::OsStrExt;
 use std::sync::Mutex;
 
-use backingstore::*;
-use settings::*;
-use rwhashes::*;
+use crate::backingstore::*;
+use crate::settings::*;
+use crate::rwhashes::*;
 
 mod entry;
 pub use self::entry::*;

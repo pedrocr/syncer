@@ -9,8 +9,8 @@ mod rsync;
 use self::blobstorage::*;
 pub use self::blobstorage::BlobHash;
 use super::filesystem::FSEntry;
-use rwhashes::*;
-use config::*;
+use crate::rwhashes::*;
+use crate::config::*;
 
 use self::libc::c_int;
 use std::sync::Mutex;

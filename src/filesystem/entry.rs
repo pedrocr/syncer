@@ -11,8 +11,8 @@ use std::cmp;
 use std::collections::BTreeMap;
 
 use super::vclock::*;
-use backingstore::*;
-use settings::*;
+use crate::backingstore::*;
+use crate::settings::*;
 
 #[derive(Serialize, Deserialize)]
 #[serde(remote = "Timespec")]

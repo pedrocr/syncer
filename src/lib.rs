@@ -23,8 +23,8 @@ mod settings;
 mod rwhashes;
 pub mod config;
 
-use settings::*;
-use config::*;
+use crate::settings::*;
+use crate::config::*;
 
 use self::backingstore::BackingStore;
 use self::filesystem::FS;
