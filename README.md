@@ -62,4 +62,4 @@ Contributing
 
 Bug reports and pull requests welcome at https://github.com/pedrocr/syncer
 
-Meet us at #chimper on irc.freenode.net if you need to discuss a feature or issue in detail or even just for general chat.
+Meet us at #chimper on irc.libera.chat if you need to discuss a feature or issue in detail or even just for general chat.
