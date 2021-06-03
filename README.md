@@ -2,7 +2,7 @@
 
 **WARNING: This is highly experimental and will probably eat your data. Make sure you have good backups before you test it.**
 
-[![Build Status](https://travis-ci.org/pedrocr/syncer.svg?branch=master)](https://travis-ci.org/pedrocr/syncer)
+[![Build Status](https://travis-ci.com/pedrocr/syncer.svg?branch=master)](https://travis-ci.com/pedrocr/syncer)
 [![Crates.io](https://img.shields.io/crates/v/syncer.svg)](https://crates.io/crates/syncer)
 
 This is a filesystem that allows you to keep a seamless local view of a very large repository of files while only really having a much smaller local cache. It's meant for situations where you have too small of a disk to hold the full collection but instead would like to fetch data from a remote server on demand. The use case it was built for was having a very large collection of media (e.g., a multi-terabyte photo collection) and wanting to be able to seamlessly access it at any time on a laptop that only has a few GBs of space.
@@ -62,4 +62,4 @@ Contributing
 
 Bug reports and pull requests welcome at https://github.com/pedrocr/syncer
 
-Meet us at #chimper on irc.libera.chat if you need to discuss a feature or issue in detail or even just for general chat.
+Meet us at #chimper on irc.libera.chat if you need to discuss a feature or issue in detail or even just for general chat. To just start chatting go to https://web.libera.chat/#chimper
